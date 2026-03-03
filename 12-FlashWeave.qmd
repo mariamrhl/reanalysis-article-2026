@@ -1,0 +1,23 @@
+---
+title: "Network inference with FlashWeave"
+author:
+  - Mariam Rahali Masbouri
+date: today 
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+execute:
+  cache: false 
+  warning: false
+project:
+  execute-dir: project
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
