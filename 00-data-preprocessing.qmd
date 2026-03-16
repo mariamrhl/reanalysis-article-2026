@@ -1,0 +1,109 @@
+---
+title: "Data preprocessing of gut microbiota cohorts"
+author:
+  - Mariam Rahali Masbouri
+date: today 
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+execute:
+  cache: false 
+  warning: false
+project:
+  execute-dir: project
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r}
+#| include: false
+
+library(readr)
+library(biomformat) # BiocManager::install("biomformat")
+library(stringr)
+library(remotes)
+library(phyloseq)
+library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
+library(readxl)
+library(tibble)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(janitor)
+library(gt)
+library(vegan)
+library(ggpubr)
+library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
+library(beemStatic) # remotes::install_github('lch14forever/beem-static')
+library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
+library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
+library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
+
+tmp <- fs::dir_map("R", source)
+rm(tmp)
+
+theme_set(theme_light())
+
+```
+
+In this first section, we will first import the relevant datasets from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. The datasets are available at these following links:
+
+* For **dysbiotic cohorts** (in `01-dysbiotic-cohorts.qmd`):
+
+  - IBD cohort: [https://ibdmdb.org/results](https://ibdmdb.org/results)
+  - IBS cohort: [https://data.mendeley.com/datasets/29n2z5r5ph/3](https://data.mendeley.com/datasets/29n2z5r5ph/3)
+  - CRC cohort: [https://www.nature.com/articles/s41591-019-0458-7](https://www.nature.com/articles/s41591-019-0458-7)
+  - CDI cohort: [https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI](https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI)
+  
+* For **healthy cohorts** (in `02-healthy-cohorts.qmd`):
+
+  - HMPv13 and HMPv35: [https://github.com/twbattaglia/MicrobeDS/tree/master/data](https://github.com/twbattaglia/MicrobeDS/tree/master/data)
+  - NIBIOHN and MORINAGA cohorts: [https://link.springer.com/article/10.1186/s12866-021-02215-0](https://link.springer.com/article/10.1186/s12866-021-02215-0)
+  - Diet intervention cohort: [https://pubmed.ncbi.nlm.nih.gov/36079725/](https://pubmed.ncbi.nlm.nih.gov/36079725/)
+  
+Supplementary cohorts will also be used in the analyses, and they will be imported in the third section (see `03-supplementary-cohorts.qmd`).
+
+The final outputs will be two MAE (MultiAssayExperiment) objects, a `MAE_raw` object containing raw data with only minimal cleaning, and `MAE_processed` object containing data that has been rarefied for the downstream analyses.
+
+# Dysbiotic cohorts
+
+```{r 00-data-preprocessing, child = '01-dysbiosis-cohorts.qmd'}
+#| eval: true
+```
+
+# Healthy cohorts
+
+```{r 00-data-preprocessing, child = '02-healthy-cohorts.qmd'}
+#| eval: true
+```
+
+# Supplementary cohorts
+
+```{r 00-data-preprocessing, child = '03-supplementary-cohorts.qmd'}
+#| eval: false
+```
+
+# MAE integration
+
+```{r 00-data-preprocessing, child = '04-MAE-summary.qmd'}
+#| eval: true
+```
+
+# Saving the preprocessed MAE
+
+We save the preprocessed MAE object as an RDS file for later use in the downstream analyses.
+
+```{r}
+
+saveRDS(mae, file.path(data_dir(), "02-processed-data", str_c("MAE_processed_", today() |> str_remove_all("-"), ".rds")))
+
+```
+

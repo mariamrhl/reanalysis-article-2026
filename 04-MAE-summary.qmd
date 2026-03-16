@@ -1,0 +1,74 @@
+---
+title: "Multi-assay Experiment (MAE) integration"
+author:
+  - Mariam Rahali Masbouri
+date: today 
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+execute:
+  cache: false 
+  warning: false
+project:
+  execute-dir: project
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
+
+In this section, we will integrate the different cohorts datasets using the `MultiAssayExperiment` (MAE) class from Bioconductor. This class provides a convenient way to manage and analyze the cohorts.
+
+We first transform the datasets into `SummarizedExperiment` objects.
+
+```{r}
+
+# Diseased cohorts
+
+se_ibd <- phyloseq_to_SE(ps_ibd)
+se_ibs <- phyloseq_to_SE(ps_ibs)
+se_cdi <- phyloseq_to_SE(ps_cdi)
+se_crc <- phyloseq_to_SE(ps_crc)
+
+# Healthy cohorts
+
+se_hmpv13 <- phyloseq_to_SE(ps_hmpv13)
+se_hmpv35 <- phyloseq_to_SE(ps_hmpv35)
+se_NIBIOHN <- phyloseq_to_SE(ps_NIBIOHN)
+se_MORINAGA <- phyloseq_to_SE(ps_MORINAGA)
+
+```
+
+We create below a `MultiAssayExperiment` object that contains all the `SummarizedExperiment` objects.
+
+```{r}
+# Create a list of the SummarizedExperiment objects
+
+se_list <- list(
+  IBD = se_ibd,
+  IBS = se_ibs,
+  CDI = se_cdi,
+  CRC = se_crc,
+  HMPV13 = se_hmpv13,
+  HMPV35 = se_hmpv35,
+  NIBIOHN = se_NIBIOHN,
+  MORINAGA = se_MORINAGA
+)
+
+```
+
+
+```{r}
+
+# Create the MultiAssayExperiment object
+
+mae <- MultiAssayExperiment(experiments = se_list)
+
+mae
+
+```

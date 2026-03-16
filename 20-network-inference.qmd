@@ -21,3 +21,23 @@ editor: source
 editor_options: 
   chunk_output_type: inline
 ---
+
+# Importing the MAE object
+
+```{r}
+
+mae_file <- 
+  fs::dir_ls(str_c(data_dir(), "/02-processed-data"), regexp = "MAE_processed_.*\\.rds$") |> 
+  sort(decreasing = TRUE) |>
+  magrittr::extract(1)
+
+
+cat(str_c("Loading MultiAssayExperiment from: 00_data/", mae_file |> str_remove(data_dir()), "\n"))
+
+mae <- readRDS(mae_file)
+
+rm(mae_file)
+
+mae
+
+```

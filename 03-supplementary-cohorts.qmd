@@ -1,5 +1,5 @@
 ---
-title: "Network inference with BEEM-Static"
+title: "Descriptive analysis for supp. cohorts"
 author:
   - Mariam Rahali Masbouri
 date: today 
@@ -22,3 +22,10 @@ editor_options:
   chunk_output_type: inline
 ---
 
+## IBD dataset from Fransoza et al. (2019)
+
+> TO COMPLETE
+
+## IBD dataset from Halfvarson et al. (2017)
+
+> TO COMPLETE

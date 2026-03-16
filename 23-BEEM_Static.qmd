@@ -1,0 +1,1441 @@
+---
+title: "Network inference with BEEM-Static"
+author:
+  - Mariam Rahali Masbouri
+date: today 
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+execute:
+  cache: false 
+  warning: false
+project:
+  execute-dir: project
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
+
+In this section, we will apply BEEM-Static to the differents cohorts from the main analysis, and additionnaly compute beta diversity, evenness, and richness measures.
+
+## IBD cohort
+
+We first import the IBD dataset from the MAE object in the chunk code below.
+
+```{r}
+
+tmp <-
+  mae[["IBD"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "sample_id") |> select(sample_id, participant_id, visit_num, diagnosis),
+    by = join_by(sample_id)
+  )
+
+```
+
+We compute the number of taxa and samples in the dataset, to get an sense of the size of the dataset.
+
+```{r}
+
+n_taxa <- mae[["IBD"]] |> assay() |> nrow()
+cat("Number of taxa:", n_taxa, "\n")
+
+n_samples <- mae[["IBD"]] |> assay() |> ncol()
+cat("Number of samples:", n_samples, "\n")
+
+```
+
+```{r}
+# separate healthy and IBD samples
+
+mae[["IBD"]] |> 
+  colData() |> 
+  as.data.frame() |> 
+  as_tibble(rownames = "sample_id") |>
+  mutate(
+    status = case_when(
+      diagnosis == "UC" ~ "Diseased",
+      diagnosis == "CD" ~ "Diseased",
+      TRUE ~ "Healthy"
+    ),
+    status = factor(status)
+  ) |> 
+  dplyr::count(status) |>
+  gt(caption = "Number of healthy and diseased samples in the IBS dataset")
+
+```
+
+::: {.callout-important}
+Rarefaction cannot be applied to the IBD dataset, since counts are not available for this dataset, and only relative abundances are available. 
+:::
+
+### Metrics computation
+
+We will compute beta diversity, evenness, and richness measures on the rarefied dataset. We will use the `vegan` package to compute these metrics.
+
+- $Richness = \sum_{i=1}^{S} I(x_i > 0)$, where $S$ is the total number of taxa and $x_i$ is the abundance of taxon $i$ in the sample.
+- $Shannon = -\sum_{i=1}^{S} p_i \log(p_i)$, where $p_i$ is the relative abundance of taxon $i$ in the sample.
+- $Pielou's\ evenness = \frac{-\sum_{i=1}^{S} p_i \log(p_i)}{\log(\sum_{i=1}^{S} I(x_i > 0))}$
+- $Sheldon\ evenness = \frac{exp(-\sum_{i=1}^{S} p_i \log(p_i))}{\sum_{i=1}^{S} I(x_i > 0)}$
+- Beta diversity will be computed using Bray-Curtis dissimilarity.
+
+```{r}
+
+bc_mat <- tmp_rarefied |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  as.matrix()
+
+```
+
+
+```{r}
+
+bc_per_sample <- vegan::vegdist(bc_mat, method = "bray") |>
+  as.matrix() |>
+  rowMeans() |>
+  as_tibble(rownames = "sample_id") |>
+  dplyr::rename(bc = value)
+
+```
+
+
+```{r}
+
+metrics <- tmp_rarefied |>
+  group_by(sample_id) |>
+  summarise(
+    richness = sum(rel_ab > 0),
+    shannon  = vegan::diversity(rel_ab, index = "shannon"),
+    pielou   = shannon / log(richness),
+    sheldon  = exp(shannon) / richness,
+    .groups  = "drop"
+  ) |>
+  left_join(bc_per_sample, by = "sample_id") |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, participant_id, visit_num, diagnosis),
+    by = join_by(sample_id)
+  ) |>
+  group_by(study_id, cohort) |>
+  summarise(across(c(richness, shannon, pielou, sheldon, bc), mean), .groups = "drop") |>
+  mutate(
+    status = case_when(
+      diagnosis == "UC" ~ "Diseased",
+      diagnosis == "CD" ~ "Diseased",
+      TRUE ~ "Healthy"
+    ),
+    status = factor(status)
+  )
+
+```
+
+
+```{r}
+# richness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = richness, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Richness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# shannon diversity plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = shannon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Shannon diversity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Pielou evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = pielou, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Pielou evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Sheldon evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = sheldon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Sheldon evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+```{r}
+# Bray Curtis plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = bc, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+### Prevalence filtering
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 20% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+::: {.callout-note}
+The choice of a prevalence threshold of 20% is somewhat arbitrary, but it is necessary in this case since BEEM-Static does not handle datasets with lots of zeros well.
+:::
+
+```{r}
+
+tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
+tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
+
+```
+
+
+```{r}
+# for healthy samples
+
+prevalence_threshold <- 0.2
+
+taxa_to_keep <- tmp_healthy |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_healthy$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_healthy <- tmp_healthy |>
+  mutate(taxon = ifelse(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(rel_ab = sum(rel_ab), .groups = "drop") |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  )
+
+```
+
+
+```{r}
+# for diseased samples
+
+prevalence_threshold <- 0.2
+
+taxa_to_keep <- tmp_diseased |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_diseased$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_diseased <- tmp_diseased |>
+  mutate(taxon = if_else(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(rel_ab = sum(rel_ab), .groups = "drop") |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  )
+
+```
+
+### Network inference (test run)
+
+BEEM Static expect as input a matrix of counts, with rows as taxa and columns as samples. We will thus transform the filtered dataset into the expected format, and then apply BEEM-Static to infer the microbial association network.
+
+We will first transform the filtered datasets (healthy and diseased) into the expected format, and then apply BEEM-Static to infer the microbial association network. This is done in the chunk code below.
+
+```{r}
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+
+```{r}
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+We apply the algorithm on the healthy and diseased datasets separately, to infer two separate networks.
+
+```{r}
+
+res_healthy <- beemStatic::func.EM(healthy_df)
+
+```
+
+The results for the healthy dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_healthy)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
+
+```{r}
+
+res_diseased <- beemStatic::func.EM(diseased_df)
+
+```
+
+The results for diseased dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_diseased)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
+
+## IBS cohort
+
+We first import the IBS dataset from the MAE object in the chunk code below.
+
+```{r}
+
+tmp <-
+  mae[["IBS"]] |> 
+  assay() |> 
+  t() |> 
+  as.data.frame() |> 
+  rownames_to_column("sample_id") |> 
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as_tibble(rownames = "sample_id") |> select(sample_id, study_id, timepoint, cohort), 
+    by = join_by(sample_id)
+  )
+
+```
+
+We compute the number of taxa and samples in the dataset, to get an sense of the size of the dataset.
+
+```{r}
+
+n_taxa <- mae[["IBS"]] |> assay() |> nrow()
+cat("Number of taxa:", n_taxa, "\n")
+
+n_samples <- mae[["IBS"]] |> assay() |> ncol()
+cat("Number of samples:", n_samples, "\n")
+
+```
+
+
+```{r}
+# separate healthy and IBS samples
+
+mae[["IBS"]] |> 
+  colData() |> 
+  as.data.frame() |> 
+  as_tibble(rownames = "sample_id") |>
+  mutate(
+    status = case_when(
+      cohort == "H" ~ "Healthy",
+      cohort == "IBS" ~ "Diseased"
+    ),
+    status = factor(status)
+  ) |> 
+  dplyr::count(status) |>
+  gt(caption = "Number of healthy and diseased samples in the IBS dataset")
+
+```
+
+### Rarefaction
+
+We will then rarefy the IBS dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
+
+First, we separate the dataset into two groups: "healthy" and "diseased" so that rarefaction (and prevalence filtering) is performed separately for the two groups, to avoid biasing the results by removing more samples from one group than the other.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(cohort == "H")
+tmp_diseased <- tmp |> filter(cohort == "IBS")
+
+```
+
+We show the distribution of sequencing depth across samples, to choose a rarefaction depth.
+
+```{r}
+
+tmp_healthy |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across healthy samples")
+
+tmp_diseased |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across diseased samples")
+
+```
+
+We will thus rarefy at a depth of median(depth)/2; this is done in the chucks below, where we also filters out samples with depth < median(depth)/2.
+
+::: {.callout-note}
+Note that a classical rarefaction threshold would be to simply take the median depth, but in this case, we choose to take the median depth divided by 2, to keep more samples in the dataset, especially given the relatively small number of samples in the IBS dataset.
+:::
+
+```{r}
+# for healthy samples
+
+tmp_depth <- tmp_healthy |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied_healthy <- tmp_healthy |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+
+```{r}
+
+# for diseased samples
+
+tmp_depth <- tmp_diseased |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied_diseased <- tmp_diseased |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+We merge both datasets into a single dataset, and add the metadata information.
+
+```{r}
+
+tmp_rarefied <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  )
+
+```
+
+We compute the number of taxa and samples in the rarefied dataset, to get an sense of the size of the dataset.
+
+```{r}
+
+n_taxa_rarefied <- tmp_rarefied |> pull(taxon) |> unique() |> length()
+cat("Number of taxa after rarefaction:", n_taxa_rarefied, "\n")
+
+n_samples_rarefied <- tmp_rarefied |> pull(sample_id) |> unique() |> length()
+cat("Number of samples after rarefaction:", n_samples_rarefied, "\n")
+
+```
+
+We also compute the number of sample in each group (healthy vs diseased) in the rarefied dataset.
+
+```{r}
+
+tmp_rarefied |> 
+  select(sample_id, cohort) |>
+  distinct() |>
+  mutate(
+    status = case_when(
+      cohort == "H" ~ "Healthy",
+      cohort == "IBS" ~ "Diseased"
+    )
+  ) |> 
+  dplyr::count(status) |> 
+  gt(caption = "Number of healthy and diseased samples in the rarefied IBS dataset")
+
+```
+
+> TODO: If the above steps are common to all datasets, maybe do these in 00-data-preprocessing.qmd, and then just import the rarefied datasets in this section?
+
+### Metrics computation
+
+We will compute beta diversity, evenness, and richness measures on the rarefied dataset. We will use the `vegan` package to compute these metrics.
+
+- $Richness = \sum_{i=1}^{S} I(x_i > 0)$, where $S$ is the total number of taxa and $x_i$ is the abundance of taxon $i$ in the sample.
+- $Shannon = -\sum_{i=1}^{S} p_i \log(p_i)$, where $p_i$ is the relative abundance of taxon $i$ in the sample.
+- $Pielou's\ evenness = \frac{-\sum_{i=1}^{S} p_i \log(p_i)}{\log(\sum_{i=1}^{S} I(x_i > 0))}$
+- $Sheldon\ evenness = \frac{exp(-\sum_{i=1}^{S} p_i \log(p_i))}{\sum_{i=1}^{S} I(x_i > 0)}$
+- Beta diversity will be computed using Bray-Curtis dissimilarity.
+
+```{r}
+
+bc_mat <- tmp_rarefied |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  as.matrix()
+
+```
+
+
+```{r}
+
+bc_per_sample <- vegan::vegdist(bc_mat, method = "bray") |>
+  as.matrix() |>
+  rowMeans() |>
+  as_tibble(rownames = "sample_id") |>
+  dplyr::rename(bc = value)
+
+```
+
+
+```{r}
+
+metrics <- tmp_rarefied |>
+  group_by(sample_id) |>
+  summarise(
+    richness = sum(rel_ab > 0),
+    shannon  = vegan::diversity(rel_ab, index = "shannon"),
+    pielou   = shannon / log(richness),
+    sheldon  = exp(shannon) / richness,
+    .groups  = "drop"
+  ) |>
+  left_join(bc_per_sample, by = "sample_id") |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |>
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  ) |>
+  group_by(study_id, cohort) |>
+  summarise(across(c(richness, shannon, pielou, sheldon, bc), mean), .groups = "drop") |>
+  mutate(
+    status = case_when(
+      cohort == "H"   ~ "Healthy",
+      cohort == "IBS" ~ "Diseased"
+    ),
+    status = factor(status)
+  )
+
+```
+
+
+```{r}
+# richness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = richness, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Richness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# shannon diversity plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = shannon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Shannon diversity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Pielou evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = pielou, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Pielou evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Sheldon evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = sheldon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Sheldon evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Bray Curtis plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = bc, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+::: {.callout-note}
+All the above metrics for the IBS dataset, computed on rarefied data, do not show a significant difference between healthy and diseased samples. This is in line with conclusion from the paper from Lopez et al. (2026). In the original paper from Mars et al. (2020), the authors calculated Shannon diversity on healthy and diseases samples and found a similar trend (although no p-values between groups were reported in the paper).
+:::
+
+
+### Prevalence filtering
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 50% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+::: {.callout-note}
+The choice of a prevalence threshold of 50% is somewhat arbitrary, but it is necessary in this case since BEEM-Static does not handle datasets with lots of zeros well.
+:::
+
+```{r}
+# for healthy samples
+
+prevalence_threshold <- 0.5
+
+taxa_to_keep <- tmp_rarefied_healthy |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_rarefied_healthy$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_healthy <- tmp_rarefied_healthy |>
+  mutate(taxon = if_else(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(count = sum(count), .groups = "drop") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  )
+
+```
+
+
+```{r}
+# for diseased samples
+
+prevalence_threshold <- 0.5
+
+taxa_to_keep <- tmp_rarefied_diseased |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_rarefied_diseased$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_diseased <- tmp_rarefied_diseased |>
+  mutate(taxon = if_else(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(count = sum(count), .groups = "drop") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, study_id, timepoint, cohort),
+    by = join_by(sample_id)
+  )
+
+```
+
+### Network inference (test run)
+
+BEEM Static expect as input a matrix of relative abundances, with rows as taxa and columns as samples. We will thus transform the filtered dataset into the expected format, and then apply BEEM-Static to infer the microbial association network.
+
+We will first transform the filtered datasets (healthy and diseased) into the expected format, and then apply BEEM-Static to infer the microbial association network. This is done in the chunk code below.
+
+```{r}
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+
+```{r}
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+We apply the algorithm on the healthy and diseased datasets separately, to infer two separate networks.
+
+```{r}
+
+res_healthy <- beemStatic::func.EM(healthy_df)
+
+```
+
+The results for the healthy dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_healthy)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
+
+
+```{r}
+
+res_diseased <- beemStatic::func.EM(diseased_df)
+
+```
+
+The results for the diseased dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_diseased)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
+
+## CDI cohort
+
+We first import the IBD dataset from the MAE object in the chunk code below.
+
+```{r}
+
+tmp <-
+  mae[["CDI"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "sample_id") |> select(sample_id, status, subject_disease_status),
+    by = join_by(sample_id)
+  ) |>
+  filter(subject_disease_status == "CDI" | subject_disease_status == "CTR")
+
+```
+
+We compute the number of taxa and samples in the dataset, to get an sense of the size of the dataset.
+
+```{r}
+
+n_taxa <- mae[["CDI"]] |> assay() |> nrow()
+cat("Number of taxa:", n_taxa, "\n")
+
+n_samples <- mae[["CDI"]] |> assay() |> ncol()
+cat("Number of samples:", n_samples, "\n")
+
+```
+
+```{r}
+# separate healthy and CDI samples
+
+mae[["CDI"]] |> 
+  colData() |> 
+  as.data.frame() |> 
+  as_tibble(rownames = "sample_id") |>
+  dplyr::count(status) |>
+  gt(caption = "Number of healthy and diseased samples in the CDI dataset")
+
+```
+
+
+### Rarefaction
+
+We will then rarefy the CDI dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
+
+First, we separate the dataset into two groups: "healthy" and "diseased" so that rarefaction (and prevalence filtering) is performed separately for the two groups, to avoid biasing the results by removing more samples from one group than the other.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(status == "Healthy")
+tmp_diseased <- tmp |> filter(status == "Diseased")
+
+```
+
+We show the distribution of sequencing depth across samples, to choose a rarefaction depth and a prevalence threshold.
+
+```{r}
+
+tmp_healthy |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across healthy samples")
+
+tmp_diseased |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across diseased samples")
+
+```
+
+We will thus rarefy at a depth of median(depth)/2; this is done in the chucks below, where we also filters out samples with depth < median(depth)/2.
+
+```{r}
+# for healthy samples
+
+tmp_depth <- tmp_healthy |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied_healthy <- tmp_healthy |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+
+```{r}
+
+# for diseased samples
+
+tmp_depth <- tmp_diseased |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied_diseased <- tmp_diseased |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+We merge both datasets into a single dataset, and add the metadata information.
+
+```{r}
+
+tmp_rarefied <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, status),
+    by = join_by(sample_id)
+  )
+
+```
+
+We compute the number of taxa and samples in the rarefied dataset, to get an sense of the size of the dataset.
+
+```{r}
+
+n_taxa_rarefied <- tmp_rarefied |> pull(taxon) |> unique() |> length()
+cat("Number of taxa after rarefaction:", n_taxa_rarefied, "\n")
+
+n_samples_rarefied <- tmp_rarefied |> pull(sample_id) |> unique() |> length()
+cat("Number of samples after rarefaction:", n_samples_rarefied, "\n")
+
+```
+
+We also compute the number of sample in each group (healthy vs diseased) in the rarefied dataset.
+
+```{r}
+
+tmp_rarefied |> 
+  select(sample_id, status) |>
+  distinct() |>
+  dplyr::count(status) |> 
+  gt(caption = "Number of healthy and diseased samples in the rarefied CDI dataset")
+
+```
+
+### Metrics computation
+
+We will compute beta diversity, evenness, and richness measures on the rarefied dataset. We will use the `vegan` package to compute these metrics.
+
+- $Richness = \sum_{i=1}^{S} I(x_i > 0)$, where $S$ is the total number of taxa and $x_i$ is the abundance of taxon $i$ in the sample.
+- $Shannon = -\sum_{i=1}^{S} p_i \log(p_i)$, where $p_i$ is the relative abundance of taxon $i$ in the sample.
+- $Pielou's\ evenness = \frac{-\sum_{i=1}^{S} p_i \log(p_i)}{\log(\sum_{i=1}^{S} I(x_i > 0))}$
+- $Sheldon\ evenness = \frac{exp(-\sum_{i=1}^{S} p_i \log(p_i))}{\sum_{i=1}^{S} I(x_i > 0)}$
+- Beta diversity will be computed using Bray-Curtis dissimilarity.
+
+```{r}
+
+bc_mat <- tmp_rarefied |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  as.matrix()
+
+```
+
+
+```{r}
+
+bc_per_sample <- vegan::vegdist(bc_mat, method = "bray") |>
+  as.matrix() |>
+  rowMeans() |>
+  as_tibble(rownames = "sample_id") |>
+  dplyr::rename(bc = value)
+
+```
+
+
+```{r}
+
+metrics <- tmp_rarefied |>
+  group_by(sample_id) |>
+  summarise(
+    richness = sum(rel_ab > 0),
+    shannon  = vegan::diversity(rel_ab, index = "shannon"),
+    pielou   = shannon / log(richness),
+    sheldon  = exp(shannon) / richness,
+    .groups  = "drop"
+  ) |>
+  left_join(bc_per_sample, by = "sample_id") |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, status),
+    by = join_by(sample_id)
+  ) |>
+  group_by(study_id, cohort) |>
+  summarise(across(c(richness, shannon, pielou, sheldon, bc), mean), .groups = "drop")
+
+```
+
+
+```{r}
+
+metrics <- 
+  tmp_rarefied |>
+  group_by(sample_id) |> 
+  summarise(
+    richness = sum(rel_ab > 0),
+    shannon = vegan::diversity(rel_ab, index = "shannon"),
+    pielou = shannon / log(richness),
+    sheldon = exp(shannon) / richness
+  ) |> 
+  ungroup() |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, status),
+    by = join_by(sample_id)
+  ) |>
+  group_by(sample_id, status) |>
+  summarise(across(c(richness, shannon, pielou, sheldon), mean), .groups = "drop")
+
+```
+
+
+```{r}
+# richness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = richness, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Richness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# shannon diversity plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = shannon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Shannon diversity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Pielou evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = pielou, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Pielou evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Sheldon evenness plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = sheldon, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Sheldon evenness", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+```{r}
+
+# Bray Curtis plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = bc, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+### Prevalence filtering
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 20% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+::: {.callout-note}
+The choice of a prevalence threshold of 20% is somewhat arbitrary, but it is necessary in this case since BEEM-Static does not handle datasets with lots of zeros well.
+:::
+
+```{r}
+
+# for healthy samples
+
+prevalence_threshold <- 0.3
+
+taxa_to_keep <- tmp_rarefied_healthy |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_rarefied_healthy$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_healthy <- tmp_rarefied_healthy |>
+  mutate(taxon = ifelse(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(count = sum(count), .groups = "drop") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, status),
+    by = join_by(sample_id)
+  )
+
+```
+```{r}
+
+tmp_filtered_healthy |> 
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+```
+
+
+```{r}
+
+# for diseased samples
+
+prevalence_threshold <- 0.3
+
+taxa_to_keep <- tmp_rarefied_diseased |>
+  group_by(taxon) |>
+  summarise(prevalence = mean(rel_ab > 0), .groups = "drop") |>
+  filter(prevalence >= prevalence_threshold) |>
+  pull(taxon)
+
+cat("Keeping", length(taxa_to_keep), "out of", tmp_rarefied_diseased$taxon |> unique() |> length(), "taxa with prevalence >=", prevalence_threshold * 100, "%\n")
+
+tmp_filtered_diseased <- tmp_rarefied_diseased |>
+  mutate(taxon = ifelse(taxon %in% taxa_to_keep, taxon, "Other")) |>
+  group_by(sample_id, taxon) |>
+  summarise(count = sum(count), .groups = "drop") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, status),
+    by = join_by(sample_id)
+  )
+
+```
+
+### Network inference (test run)
+
+BEEM Static expect as input a matrix of relative abundances, with rows as taxa and columns as samples. We will thus transform the filtered dataset into the expected format, and then apply BEEM-Static to infer the microbial association network.
+
+We will first transform the filtered datasets (healthy and diseased) into the expected format, and then apply BEEM-Static to infer the microbial association network. This is done in the chunk code below.
+
+```{r}
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+
+```{r}
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+We apply the algorithm on the healthy and diseased datasets separately, to infer two separate networks.
+
+```{r}
+
+res_healthy <- beemStatic::func.EM(healthy_df)
+
+```
+
+The results for the healthy dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_healthy)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
+
+
+```{r}
+
+res_diseased <- beemStatic::func.EM(diseased_df)
+
+```
+
+The results for the diseased dataset are displayed below.
+
+```{r}
+
+est <- beem2param(res_diseased)
+pep_inferred <- seqtime::getPep(est$b.est)
+
+# non-zero entries in the upper and lower triangle (skipping diagonal) 
+values <- est$b.est[upper.tri(est$b.est)]
+values <- c(values,est$b.est[lower.tri(est$b.est)])
+
+edge_num <- (length(which(values != 0))) 
+
+cat("Number of edges in the inferred network:", edge_num, "\n")
+cat("Proportion of positive edges in the inferred network:", pep_inferred, "\n")
+
+```
