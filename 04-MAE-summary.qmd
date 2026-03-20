@@ -41,6 +41,7 @@ se_hmpv13 <- phyloseq_to_SE(ps_hmpv13)
 se_hmpv35 <- phyloseq_to_SE(ps_hmpv35)
 se_NIBIOHN <- phyloseq_to_SE(ps_NIBIOHN)
 se_MORINAGA <- phyloseq_to_SE(ps_MORINAGA)
+se_DIET <- phyloseq_to_SE(ps_DIET)
 
 ```
 
@@ -57,7 +58,9 @@ se_list <- list(
   HMPV13 = se_hmpv13,
   HMPV35 = se_hmpv35,
   NIBIOHN = se_NIBIOHN,
-  MORINAGA = se_MORINAGA
+  MORINAGA = se_MORINAGA,
+  DIET = se_DIET
+  
 )
 
 ```

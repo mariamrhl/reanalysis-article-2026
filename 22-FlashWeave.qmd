@@ -21,3 +21,122 @@ editor: source
 editor_options: 
   chunk_output_type: inline
 ---
+
+In this section, we will apply FlashWeave to the different cohorts separately.
+
+## IBD cohort
+
+> A sample (starting with H) has a taxon with relative abundance == 1.
+
+We first import the IBD dataset from the MAE object in the chunk code below.
+
+```{r}
+
+tmp <-
+  mae[["IBD"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "sample_id") |> select(sample_id, participant_id, visit_num, diagnosis),
+    by = join_by(sample_id)
+  )
+
+```
+
+### Prevalence filtering
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
+tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
+
+```
+
+
+```{r}
+# for healthy samples
+
+tmp_filtered_healthy <- 
+  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, participant_id, visit_num, diagnosis),
+    by = join_by(sample_id)
+  )
+
+```
+
+
+```{r}
+# for diseased samples
+
+tmp_filtered_diseased <- 
+  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
+      select(sample_id, participant_id, visit_num, diagnosis),
+    by = join_by(sample_id)
+  )
+
+```
+
+```{r}
+
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+
+```{r}
+
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(sample_id, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("sample_id") |>
+  t()
+
+```
+
+
+### Network inference with FlashWeave (test run)
+
+```{r}
+
+julia_eval('import Pkg')
+julia_eval('Pkg.rm("FlashWeave")')
+julia_eval('Pkg.add("FlashWeave")')
+julia_eval('Pkg.build("FlashWeave")')
+
+library(JuliaCall)
+julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
+julia_eval('using FlashWeave')
+julia_eval('import FlashWeave: learn_network, save_network, load_data')
+julia_eval('println(methods(learn_network))')
+
+```
+
+
+```{r}
+
+res <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 1, subsample_pcts = 0.4, max_attempts = 5)
+
+df_res <- get_flashweave_results(res)
+
+```
+
+

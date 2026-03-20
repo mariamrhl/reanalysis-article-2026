@@ -109,6 +109,17 @@ n_samples <- mae[["IBD"]] |> assay() |> ncol()
 cat("Number of samples:", n_samples, "\n")
 
 ```
+```{r}
+
+tmp |>
+  group_by(participant_id, diagnosis) |>
+  summarise(n_samples = n_distinct(sample_id), .groups = "drop") |>
+  gt(caption = "Number of samples in the IBD dataset") |>
+  tab_options(
+    container.height = px(400)
+  )
+
+```
 
 
 ```{r}
@@ -169,6 +180,34 @@ bc_per_sample <- vegan::vegdist(bc_mat, method = "bray") |>
 
 ```{r}
 
+bc_long <- vegan::vegdist(bc_mat, method = "bray") |>
+  as.matrix() |>
+  as_tibble(rownames = "sample1") |>
+  pivot_longer(-sample1, names_to = "sample2", values_to = "bc") |>
+  filter(sample1 < sample2)
+
+sample_meta <- mae[["IBD"]] |> 
+  colData() |> 
+  as.data.frame() |> 
+  as_tibble(rownames = "sample_id") |>
+  select(sample_id, participant_id, diagnosis)
+
+bc_intra <- bc_long |>
+  select(sample1, sample2, bc) |>
+  left_join(sample_meta, by = c("sample1" = "sample_id")) |>
+  select(sample1, sample2, bc, subject1 = participant_id, cohort1 = diagnosis) |>
+  left_join(sample_meta, by = c("sample2" = "sample_id")) |>
+  select(sample1, sample2, bc, subject1, cohort1, subject2 = participant_id, cohort2 = diagnosis) |>
+  filter(subject1 == subject2) |>
+  group_by(subject1, cohort1) |>
+  summarise(bc_intra = mean(bc), .groups = "drop") |>
+  select(participant_id = subject1, diagnosis = cohort1, bc_intra)
+
+```
+
+
+```{r}
+
 metrics <- tmp |>
   group_by(sample_id) |>
   summarise(
@@ -186,6 +225,7 @@ metrics <- tmp |>
   ) |>
   group_by(participant_id, diagnosis) |>
   summarise(across(c(richness, shannon, pielou, sheldon, bc), mean), .groups = "drop") |>
+  left_join(bc_intra, by = join_by(participant_id, diagnosis)) |>
   mutate(
     status = case_when(
       diagnosis == "UC" ~ "Diseased",
@@ -302,6 +342,28 @@ metrics |>
 
 ```
 
+
+```{r}
+# Bray Curtis plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = bc_intra, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status",
+       caption = "Intra-subject Bray-Curtis dissimilarity, \ncomputed as the average Bray-Curtis dissimilarity between samples from the same subject") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
 ## IBS cohort (Mars et al., 2020)
 
 We first import the IBS dataset from the MAE object in the chunk code below.
@@ -323,6 +385,20 @@ tmp <-
   )
 
 ```
+
+
+```{r}
+
+tmp |>
+  group_by(study_id, cohort) |>
+  summarise(n_samples = n_distinct(sample_id), .groups = "drop") |>
+  gt(caption = "Number of samples in the IBS dataset, separated by study and cohort") |>
+  tab_options(
+    container.height = px(400)
+  )
+
+```
+
 
 We compute the number of taxa and samples in the dataset, to get an sense of the size of the dataset.
 
@@ -390,6 +466,34 @@ bc_per_sample <- vegan::vegdist(bc_mat, method = "bray") |>
 
 ```{r}
 
+bc_long <- vegan::vegdist(bc_mat, method = "bray") |>
+  as.matrix() |>
+  as_tibble(rownames = "sample1") |>
+  pivot_longer(-sample1, names_to = "sample2", values_to = "bc") |>
+  filter(sample1 < sample2)
+
+sample_meta <- mae[["IBS"]] |> 
+  colData() |> 
+  as.data.frame() |> 
+  as_tibble(rownames = "sample_id") |>
+  select(sample_id, study_id, cohort)
+
+bc_intra <- bc_long |>
+  select(sample1, sample2, bc) |>
+  left_join(sample_meta, by = c("sample1" = "sample_id")) |>
+  select(sample1, sample2, bc, subject1 = study_id, cohort1 = cohort) |>
+  left_join(sample_meta, by = c("sample2" = "sample_id")) |>
+  select(sample1, sample2, bc, subject1, cohort1, subject2 = study_id, cohort2 = cohort) |>
+  filter(subject1 == subject2) |>
+  group_by(subject1, cohort1) |>
+  summarise(bc_intra = mean(bc), .groups = "drop") |>
+  select(study_id = subject1, cohort = cohort1, bc_intra)
+
+```
+
+
+```{r}
+
 metrics <- tmp |>
   group_by(sample_id) |>
   summarise(
@@ -407,6 +511,7 @@ metrics <- tmp |>
   ) |>
   group_by(study_id, cohort) |>
   summarise(across(c(richness, shannon, pielou, sheldon, bc), mean), .groups = "drop") |>
+  left_join(bc_intra, by = join_by(study_id, cohort)) |>
   mutate(
     status = case_when(
       cohort == "H"   ~ "Healthy",
@@ -503,7 +608,7 @@ metrics |>
 
 
 ```{r}
-# Bray Curtis plot
+# Inter subject Bray Curtis plot
 
 metrics |> 
   ggplot() +
@@ -511,6 +616,28 @@ metrics |>
   geom_violin(color = NA, alpha = 0.5) +
   geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
   labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status") +
+    stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  )
+
+```
+
+
+```{r}
+# Intra subject Bray Curtis plot
+
+metrics |> 
+  ggplot() +
+  aes(x = status, y = bc_intra, fill = status, color = status) +
+  geom_violin(color = NA, alpha = 0.5) +
+  geom_point(position = position_jitter(width = 0.3), alpha = 0.7, size = 1.5) +
+  labs(x = "", y = "Bray-Curtis dissimilarity", fill = "Status", color = "Status", 
+       caption = "Intra-subject Bray-Curtis dissimilarity, \ncomputed as the average Bray-Curtis dissimilarity between samples from the same subject") +
     stat_compare_means(
     comparisons = list(c("Healthy", "Diseased")),
     method = "wilcox.test",

@@ -408,8 +408,6 @@ samples <-
          timepoint = timepoint |> factor()) |>
   column_to_rownames("sample_id")
 
-samples |> glimpse()
-
 ```
 We will then rarefy the IBS dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
 
@@ -476,7 +474,7 @@ tmp_depth <- tmp_healthy |>
   group_by(sample_id) |>
   summarise(depth = sum(count), .groups = "drop")
 
-min_depth <- median(tmp_depth$depth) / 2
+min_depth <- median(tmp_depth$depth) / 2 |> round()
 
 samples_to_keep <- tmp_depth |>
   filter(depth >= min_depth) |>
@@ -508,7 +506,7 @@ tmp_depth <- tmp_diseased |>
   group_by(sample_id) |>
   summarise(depth = sum(count), .groups = "drop")
 
-min_depth <- median(tmp_depth$depth) / 2
+min_depth <- median(tmp_depth$depth) / 2 |> round()
 
 samples_to_keep <- tmp_depth |>
   filter(depth >= min_depth) |>
@@ -531,18 +529,32 @@ tmp_rarefied_diseased <- tmp_diseased |>
 
 ```
 
+> If one sample is deleted, say 1000v2 (timepoint 2), do I have to delete the other sample from the same participant? And is rarefaction really needed here?
+
 We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together.
 
 ```{r}
 
 abundance <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
   select(sample_id, taxon, count) |>
-  pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+  arrange(sample_id) |>
+  pivot_wider(names_from = taxon, values_from = count) |>
   column_to_rownames("sample_id")
 
 abundance |> head() |> select(1:5)
 
 ```
+
+Some samples were discarded during rarefaction, so we need to filter the samples data to keep only the samples for which we have abundance data.
+
+```{r}
+
+samples <- samples |> filter(rownames(samples) %in% rownames(abundance))
+
+samples |> glimpse()
+
+```
+
 
 Finally, we can create the `phyloseq` object using the `otu_table`, `tax_table`, and `sample_data` functions from the `phyloseq` package.
 
@@ -765,6 +777,10 @@ taxonomy <- read_csv(file.path(data_dir(), "01-raw-data/04-CDI", "motus_taxonomy
 ```
 
 ::: {.callout-note}
+Interestingly, this dataset contains samples from different study (and thus different sequencing protocols).
+:::
+
+::: {.callout-note}
 We see here that we do not have the complete taxonomy lineage for the features in the abundance data, but only the last available taxonomic level (e.g., species). This will make it difficult to filter the dataset to keep only bacterial species, since we do not have the taxonomic annotation for the kingdom level. *Can we assume that all species are bacteria and go ahead with the analyses?*
 :::
 
@@ -874,9 +890,7 @@ I could have also kept some other diseased samples, such as those "Asymptoticall
 
 ```{r}
 
-samples <- samples |> filter(subject_disease_status == "CDI" | subject_disease_status == "CTR")
-
-samples |> glimpse()
+# samples <- samples |> filter(subject_disease_status == "CDI" | subject_disease_status == "CTR")
 
 ```
 
@@ -884,10 +898,8 @@ We filter the abundance data to keep only the samples for which we have the corr
 
 ```{r}
 
-abundance <- abundance |> 
-  select(any_of(rownames(samples)))
-
-abundance |> head() |> select(1:5)
+# abundance <- abundance |>
+#   select(any_of(rownames(samples)))
 
 ```
 
@@ -902,7 +914,8 @@ tmp <-
   rownames_to_column("taxon") |>
   pivot_longer(-taxon, names_to = "sample_id", values_to = "count") |>
   left_join(
-    samples |> rownames_to_column("sample_id") |> select(sample_id, status)
+    samples |> rownames_to_column("sample_id") |> select(sample_id, status),
+    by = join_by(sample_id)
   )
 
 ```
@@ -953,7 +966,7 @@ tmp_depth <- tmp_healthy |>
   group_by(sample_id) |>
   summarise(depth = sum(count), .groups = "drop")
 
-min_depth <- median(tmp_depth$depth) / 2
+min_depth <- median(tmp_depth$depth) / 2 |> round()
 
 samples_to_keep <- tmp_depth |>
   filter(depth >= min_depth) |>
@@ -985,7 +998,7 @@ tmp_depth <- tmp_diseased |>
   group_by(sample_id) |>
   summarise(depth = sum(count), .groups = "drop")
 
-min_depth <- median(tmp_depth$depth) / 2
+min_depth <- median(tmp_depth$depth) / 2 |> round()
 
 samples_to_keep <- tmp_depth |>
   filter(depth >= min_depth) |>
@@ -1008,14 +1021,16 @@ tmp_rarefied_diseased <- tmp_diseased |>
 
 ```
 
-We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together.
+We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together. Additionally, we filter the abundance data to only keep taxa for which the total count across samples is greater than 0, to remove taxa that are not present in any sample after rarefaction.
 
 ```{r}
 
 abundance <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
   select(sample_id, taxon, count) |>
   pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
-  column_to_rownames("sample_id")
+  column_to_rownames("sample_id") |>
+  as.data.frame() |>
+  select(where(~ sum(.) > 0))
 
 abundance |> head() |> select(1:5)
 
@@ -1023,9 +1038,19 @@ abundance |> head() |> select(1:5)
 
 Since several samples have been removed after rarefaction, we also need to filter the metadata to keep only the samples for which we have abundance data after rarefaction.
 
+> TODO: Document the taxa for which there are no more counts after rarefaction, and check for other datasets as well.
+
 ```{r}
 
-samples <- samples |> rownames_to_column("sample_id") |> filter(sample_id %in% rownames(abundance)) |> column_to_rownames("sample_id")
+samples <- samples |> filter(rownames(samples) %in% rownames(abundance))
+
+```
+
+We also filter the taxonomy table to keep only taxa for which we have abundance data after rarefaction.
+
+```{r}
+
+taxonomy <- taxonomy |> filter(rownames(taxonomy) %in% colnames(abundance))
 
 ```
 

@@ -22,6 +22,42 @@ editor_options:
   chunk_output_type: inline
 ---
 
+```{r}
+#| include: false
+
+library(readr)
+library(biomformat) # BiocManager::install("biomformat")
+library(stringr)
+library(remotes)
+library(phyloseq)
+library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
+library(readxl)
+library(tibble)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(janitor)
+library(gt)
+library(vegan)
+library(ggpubr)
+library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
+library(beemStatic) # remotes::install_github('lch14forever/beem-static')
+library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
+library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
+library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
+
+tmp <- fs::dir_map("R", source)
+rm(tmp)
+
+theme_set(theme_light())
+
+```
+
+In this file, we will perform network inference on the gut microbiota datasets using three different methods: LIMITS, FlashWeave and BEEM-Static. We will first import the relevant datasets from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. We describe first each tool and its implementation in the following sections, and then we will compare the results obtained from each method in a final section.
+
+> TODO: Modify description
+
 # Importing the MAE object
 
 ```{r}
@@ -40,4 +76,22 @@ rm(mae_file)
 
 mae
 
+```
+
+# Network inference with LIMITS
+
+```{r 20-network-inference, child = '21-LIMITS.qmd'}
+#| eval: true
+```
+
+# Network inference with FlashWeave
+
+```{r 20-network-inference, child = '22-FlashWeave.qmd'}
+#| eval: true
+```
+
+# Network inference with BEEM-Static
+
+```{r 20-network-inference, child = '23-BEEM_Static.qmd'}
+#| eval: true
 ```
