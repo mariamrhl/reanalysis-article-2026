@@ -2,24 +2,22 @@
 title: "Data preprocessing of gut microbiota cohorts"
 author:
   - Mariam Rahali Masbouri
-date: today 
-format:
-  html:
-    page-layout: full
-    code-fold: true
-    toc: true
-    toc-location: left
-    theme: cosmo
-    number-sections: true
-    embed-resources: true
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
 execute:
-  cache: false 
+  cache: true
   warning: false
-project:
-  execute-dir: project
+knitr:
+  opts_chunk:
+    out.width: "100%"
 editor: source
-editor_options: 
-  chunk_output_type: inline
 ---
 
 ```{r}
@@ -33,6 +31,7 @@ library(phyloseq)
 library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
 library(readxl)
 library(tibble)
+library(patchwork)
 library(ggplot2)
 library(dplyr)
 library(tidyverse)
@@ -54,7 +53,7 @@ theme_set(theme_light())
 
 ```
 
-In this first section, we will first import the relevant datasets from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. The datasets are available at these following links:
+In this first section, the relevant datasets are imported from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. The datasets are available at these following links:
 
 * For **dysbiotic cohorts** (in `01-dysbiotic-cohorts.qmd`):
 
@@ -69,9 +68,12 @@ In this first section, we will first import the relevant datasets from the dysbi
   - NIBIOHN and MORINAGA cohorts: [https://link.springer.com/article/10.1186/s12866-021-02215-0](https://link.springer.com/article/10.1186/s12866-021-02215-0)
   - Diet intervention cohort: [https://pubmed.ncbi.nlm.nih.gov/36079725/](https://pubmed.ncbi.nlm.nih.gov/36079725/)
   
-Supplementary cohorts will also be used in the analyses, and they will be imported in the third section (see `03-supplementary-cohorts.qmd`).
+Supplementary cohorts will also be used in the analyses, and they will be imported in the third section (see `03-supplementary-cohorts.qmd`):
 
-The final outputs will be two MAE (MultiAssayExperiment) objects, a `MAE_raw` object containing raw data with only minimal cleaning, and `MAE_processed` object containing data that has been rarefied for the downstream analyses.
+- IBD cohort without time series (Fransoza et al. 2019): [https://www.nature.com/articles/s41564-018-0306-4](https://www.nature.com/articles/s41564-018-0306-4)
+- IBD cohort with time series (Halfvarson et al., 2017): [https://www.nature.com/articles/nmicrobiol20174](https://www.nature.com/articles/nmicrobiol20174)
+
+The final output will be a MAE (MultiAssayExperiment) object, containing data that has been cleaned and rarefied for the downstream analyses.
 
 # Dysbiotic cohorts
 

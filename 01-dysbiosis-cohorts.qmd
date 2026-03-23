@@ -2,31 +2,43 @@
 title: "Data preprocessing for dysbiotic cohorts"
 author:
   - Mariam Rahali Masbouri
-date: today 
-format:
-  html:
-    page-layout: full
-    code-fold: true
-    toc: true
-    toc-location: left
-    theme: cosmo
-    number-sections: true
-    embed-resources: true
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
 execute:
-  cache: false 
+  cache: true
   warning: false
-project:
-  execute-dir: project
+knitr:
+  opts_chunk:
+    out.width: "100%"
 editor: source
-editor_options: 
-  chunk_output_type: inline
 ---
 
 In this section, we will first import the relevant datasets from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI), and then perform several descriptive analyses for each of those datasets. The analyses will include: data cleaning, taxonomic aggregation (if necessary) and rarefaction. 
 
-## IBD dataset
+We will transform each dataset into a `phyloseq` object, before merging them into a `MultiAssayExperiment` object in the last section. For this we need:
 
-The inflammatory bowel disease (IBD) dataset was obtained from the [IBDMDB](https://ibdmdb.org/), with the results published in (cite). The authors of the Science paper did not provide information to which study name the IBD dataset comes from, so we choose the HMP2 study, which seems like a reasonable choice since it is the most recent study on this page. For the analyses, we have the following datasets at our disposal:
+- abundance data, a matrix of relative abundance with samples as rows and features (taxa) as columns.
+- taxonomy data, a data frame with features (taxa) as rows and taxonomic levels as columns.
+- samples data, a data frame with samples as rows and metadata variables as columns.
+
+> TODO: Create dictionaries for metadata variables for each dataset, to keep track of the meaning of each variable and the values they can take, previous and new name, and if it is kept for further analysis or not.
+
+## IBD dataset (Lloyd-Price et al. 2019)
+
+The inflammatory bowel disease (IBD) dataset was obtained from the [IBDMDB](https://ibdmdb.org/), with the results published in Lloyd-Price et al. (2019). The authors of the Science paper did not provide information to which study name the IBD dataset comes from, so the HMP2 study was chosen, which seems like a reasonable choice since it is the most recent study on this page. 
+
+Stool samples were initially collected from 132 participants at multiple time points. Specifically, samples were collected at baseline (that is after the initial colonoscopy, which was used to stratify participants into healthy controls, Crohn's disease (CD) patients, and ulcerative colitis (UC) patients), and then every 2 weeks for 1 years.
+
+Metagenomics (MGX) were performed on 1638 stool samples; DNA was quantified, normalized, and used to prepare sequencing libraries with the Nextera XT kit. Libraries were pooled, quality-checked, and sequenced on an Illumina HiSeq platform to generate ~10 million paired-end reads per sample. Raw sequencing data was then demultiplexed and converted to standard file formats (BAM and FASTQ files) using the Picard suite.
+
+For the analyses, we have the following datasets at our disposal:
 
 - `hmp2_metadata.csv`: contains the metadata for the samples.
 
@@ -47,12 +59,6 @@ data <- read_biom(file.path(data_dir(), "01-raw-data/01-IBD", "taxonomic_profile
 
 ```
 
-We transform the BIOM object into a `phyloseq` objects in the next steps. For this we need:
-
-- abundance data, a matrix of relative abundance with samples as rows and features (taxa) as columns.
-- taxonomy data, a data frame with features (taxa) as rows and taxonomic levels as columns.
-- samples data, a data frame with samples as rows and metadata variables as columns.
-
 For abundance data, we need to filter the taxonomic profiles to keep only the bacterial species relevant for our analyses, and to remove the taxonomic levels from the taxonomic names by keeping only the last available level.
 
 ```{r}
@@ -61,6 +67,10 @@ df <- data |> biom_data() |> as.matrix() |> t() |> as.data.frame()
 abundance <- df |> select(contains("k__Bacteria"))
 
 names(abundance) <- str_extract(names(abundance), "[^|]+$")
+
+df |> pivot_longer(everything(), names_to = "feature", values_to = "rel_ab") |> 
+  filter(rel_ab == 1, feature != "k__Bacteria") |>
+  gt(caption = "Features with relative abundance of 1")
 
 ```
 
@@ -108,31 +118,25 @@ We document below how many features have `_unclassified` or `_noname` annotation
 
 ```{r}
 
-taxonomy |> 
-  summarise(
-    kingdom_unclassified = sum(str_detect(kingdom, "_unclassified"), na.rm = TRUE),
-    kingdom_noname = sum(str_detect(kingdom, "_noname"), na.rm = TRUE),
-    phylum_unclassified = sum(str_detect(phylum, "_unclassified"), na.rm = TRUE),
-    phylum_noname = sum(str_detect(phylum, "_noname"), na.rm = TRUE),
-    class_unclassified = sum(str_detect(class, "_unclassified"), na.rm = TRUE),
-    class_noname = sum(str_detect(class, "_noname"), na.rm = TRUE),
-    order_unclassified = sum(str_detect(order, "_unclassified"), na.rm = TRUE),
-    order_noname = sum(str_detect(order, "_noname"), na.rm = TRUE),
-    family_unclassified = sum(str_detect(family, "_unclassified"), na.rm = TRUE),
-    family_noname = sum(str_detect(family, "_noname"), na.rm = TRUE),
-    genus_unclassified = sum(str_detect(genus, "_unclassified"), na.rm = TRUE),
-    genus_noname = sum(str_detect(genus, "_noname"), na.rm = TRUE),
-    species_unclassified = sum(str_detect(species, "_unclassified"), na.rm = TRUE),
-    species_noname = sum(str_detect(species, "_noname"), na.rm = TRUE)
-  ) |>
-  pivot_longer(everything(), names_to = "taxonomic_level", values_to = "n") |>
-  gt(caption = "Number of features with _unclassified or _noname annotation at each taxonomic level") |>
-  tab_options(
-    container.height = px(400)
-  )
+taxonomy |>
+  summarise(across(c(kingdom, phylum, class, order, family, genus, species), list(
+    unclassified = ~ sum(str_detect(., "_unclassified"), na.rm = TRUE),
+    noname = ~ sum(str_detect(., "_noname"), na.rm = TRUE)
+  ))) |>
+  pivot_longer(everything(),
+               names_to = c("level", "type"),
+               names_sep = "_(?=unclassified|noname)",
+               values_to = "n") |>
+  mutate(level = factor(level, levels = c("kingdom", "phylum", "class", "order", "family", "genus", "species"))) |>
+  ggplot() +
+  aes(x = type, y = fct_rev(level), fill = n) +
+  geom_tile() +
+  geom_label(aes(label = n), size = 4) +
+  scale_fill_gradient(low = "white", high = "dodgerblue") +
+  labs(x = NULL, y = NULL, fill = "Count",
+       subtitle = "Unclassified / noname annotations per taxonomic level")
 
 ```
-
 
 For taxa samples, several taxa have the same taxonomic annotation, so we need to aggregate the abundance data by taxonomic annotation, and to keep only one row for each taxon in the taxonomy data.
 
@@ -240,13 +244,152 @@ rowSums(abundance) |> summary()
 
 ```
 
-For samples data, we need to filter the metadata to keep only the samples for which we have metagenomics data, and to set the sample IDs as row names. Additionally, since not all covariates in the metadata are relevant for our analyses, we also select only a subset of the metadata variables to keep in the samples data. The selected variables are: "Project", "External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", and "diagnosis".
+We check if there are any singletons (i.e., taxa that are present in only one sample) in the dataset, and if so, we document them by showing the taxonomic annotation and the number of samples with this annotation.
+
+```{r}
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  filter(rel_ab > 0.05) |>
+  group_by(taxon) |>
+  mutate(singleton = ifelse(n() == 1, "Singleton", "Non-singleton")) |>
+  ungroup() |>
+  filter(singleton == "Singleton") |>
+  ggplot() +
+  aes(x = taxon, y = sample_id, fill = rel_ab) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue", labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Taxon", y = "Sample ID", fill = "Relative abundance",
+       subtitle = "Singleton taxa where rel_ab > 5% (present in only one sample)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
+::: {.callout-note}
+The singletons in the dataset should not pose a problem for the downstream analyses, since they have a low relative abundance.
+:::
+
+We also document the distribution of the number of taxa per sample, as well as the mean relative abundance across samples over all taxa.
+
+```{r}
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  filter(rel_ab > 0) |>
+  group_by(sample_id) |>
+  summarise(n_taxa = n()) |>
+  ggplot() +
+  aes(x = n_taxa) +
+  geom_histogram(bins = 30) +
+  labs(x = "Number of taxa", y = "Number of samples",
+       subtitle = "Distribution of the number of taxa per sample") +
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  filter(rel_ab > 0) |>
+  group_by(sample_id) |>
+  summarise(mean_rel_ab = mean(rel_ab)) |>
+  ggplot() +
+  aes(x = mean_rel_ab) +
+  geom_histogram(bins = 30) +
+  labs(x = "Mean relative abundance", y = "Number of samples",
+       subtitle = "Distribution of the mean relative abundance across samples") +
+
+  plot_layout(nrow = 2)
+
+```
+
+```{r}
+
+abundance |>
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  filter(rel_ab == 1) |>
+  gt(caption = "Samples with a taxon with relative abundance of 1")
+
+```
+
+
+::: {.callout-warning}
+A sample has a taxon with relative abundance of 1. This means that this sample has only one taxon with non-zero relative abundance. However, this taxon was not identified above (before the renormalization), so this is likely due the renormalization step.
+:::
+
+For samples data, we need to filter the metadata to keep only the samples for which we have metagenomics data, and to set the sample IDs as row names. Additionally, since not all covariates in the metadata are relevant for our analyses, we also select only a subset of the metadata variables to keep in the samples data. 
+
+We document (some) of the original metadata variables in the plots below.
+
+```{r}
+# we filter out columns with only NA values
+
+metadata_filtered <- metadata |> filter(data_type == "metagenomics") |> select(where(~!all(is.na(.x))))
+samples <- metadata |> clean_names() |> filter(data_type == "metagenomics") |> select(where(~!all(is.na(.x))))
+
+```
+
+
+```{r}
+#| fig-height: 8
+#| fig-width: 8
+
+samples |>
+  filter(!is.na(age_at_diagnosis)) |>
+  ggplot() +
+  aes(x = diagnosis, y = age_at_diagnosis |> as.numeric(), fill = diagnosis, color = diagnosis) +
+  geom_violin(alpha = 0.4, color = NA) + 
+  geom_point(position = position_jitter(width = 0.2), size = 1, alpha = 0.6) +
+  scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
+  scale_color_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
+  labs(x = "", y = "Age", fill = "Diagnosis", color = "Diagnosis",
+       subtitle = "Distribution of age across diagnosis groups") +
+  
+  samples |>
+  ggplot() +
+  aes(x = education_level, fill = diagnosis) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
+  labs(y = "", x = "Education level", fill = "Diagnosis",
+       subtitle = "Distribution of education level \nacross diagnosis groups") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  
+  samples |>
+  ggplot() +
+  aes(x = occupation, fill = diagnosis) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
+  labs(y = "", x = "Occupation", fill = "Diagnosis",
+       subtitle = "Distribution of occupation across diagnosis groups") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  
+  samples |>
+  ggplot() +
+  aes(x = diagnosis, fill = diagnosis) +
+  geom_bar(position = "stack") +
+  scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
+  labs(y = "", x = "", fill = "Diagnosis",
+       subtitle = "Distribution of diagnosis groups") +
+  
+  plot_layout(nrow = 2)
+  
+  
+
+```
+
+::: {.callout-note}
+There is no age data for the healthy group, since healthy participants were not diagnosed with IBD, so they do not have an age at diagnosis.
+:::
+
+The selected variables are: "Project", "External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", and "diagnosis".
 
 ```{r}
 
 samples <- 
   metadata |> 
-  select("Project", "External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", "diagnosis") |>
+  select("External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", "diagnosis") |>
   clean_names() |>
   filter(data_type == "metagenomics") |>
   column_to_rownames("external_id")
@@ -267,6 +410,240 @@ samples <-
 
 ```
 
+
+```{r}
+#| fig-height: 4
+#| fig-width: 15
+
+samples |>
+  rownames_to_column("sample_id") |>
+  select(sample_id, participant_id, visit_num, week_num, interval_name, diagnosis) |>
+  group_by(visit_num, participant_id) |>
+  mutate(total_samples = n()) |>
+  ggplot() +
+  aes(x = participant_id, fill = diagnosis) +
+  geom_bar() +
+  labs(x = "Participant ID", y = "Number of samples", fill = "Diagnosis",
+       subtitle = "Number of samples per participant and diagnosis") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+We create a dictionary for the metadata variables, to keep track of the meaning of each variable and the values they can take, previous and new name, and if it is kept for further analysis or not.
+
+```{r}
+
+IBD_dictionary <-
+  tibble(
+    original_variable = metadata_filtered |> names(),
+    new_variable = metadata_filtered |> clean_names() |> names(),
+    description = c(
+      "Project name",
+      "External ID of the sample",
+      "Participant ID",
+      "Site and sub-collection identifier",
+      "Type of data (e.g., metagenomics, metabolomics)",
+      "Week number of sample collection",
+      "Date sample was received",
+      "Number of days since previous sample",
+      "Visit number of sample collection",
+      "Associated research project name",
+      "PDO number (project/delivery order)",
+      "GSSR IDs associated with the sample",
+      "Sequencing product used",
+      "Library construction set identifier",
+      "Aggregated sequencing lanes",
+      "Work request ID",
+      "Number of lanes included in aggregation",
+      "Total raw reads",
+      "Reads passing quality filters",
+      "Reads failing QC",
+      "Reads mapping to human genome",
+      "Interval name (e.g., baseline, week 2)",
+      "Sequence order of the interval",
+      "Project-specific sample ID",
+      "Name of collection site",
+      "Age at IBD diagnosis (years)",
+      "Highest education level attained",
+      "Participant occupation",
+      "Whole blood received at Broad Institute",
+      "Serum tube 1 received at CSMC",
+      "Serum tubes 2–4 received at MGH",
+      "Flora sample received at MGH",
+      "RNA/DNA sample received at Broad Institute",
+      "ECP sample received at Washington University",
+      "Age at consent (years)",
+      "Diagnosis group (e.g., nonIBD, CD, UC)",
+      "Frequency of sugary soft drinks, tea, or coffee",
+      "Frequency of diet drinks with artificial sweeteners",
+      "Frequency of fruit juice consumption",
+      "Frequency of water consumption",
+      "Frequency of alcohol consumption",
+      "Frequency of probiotic foods (yogurt, kefir, sauerkraut)",
+      "Frequency of dairy consumption",
+      "Probiotic supplement use",
+      "Frequency of fruit consumption (no juice)",
+      "Frequency of vegetable consumption",
+      "Medications received in the past 2 weeks",
+      "Frequency of bean/legume consumption",
+      "Frequency of whole grain consumption",
+      "Frequency of refined starch consumption",
+      "Frequency of egg consumption",
+      "Frequency of processed meat consumption",
+      "Frequency of red meat consumption",
+      "Frequency of white meat consumption",
+      "Frequency of shellfish consumption",
+      "Frequency of fish consumption",
+      "Frequency of sweets consumption",
+      "Antibiotic use in past 2 weeks",
+      "Chemotherapy in past 2 weeks",
+      "Immunosuppressant use in past 2 weeks",
+      "Colonoscopy or procedure in past 2 weeks",
+      "Oral contrast use in past 2 weeks",
+      "Diarrhea in past 2 weeks",
+      "Hospitalization in past 2 weeks",
+      "History of bowel surgery",
+      "Frequency of unsweetened tea or coffee",
+      "Fecal calprotectin level (ng/mL)",
+      "Presence of uveitis (extraintestinal manifestation)",
+      "Presence of erythema nodosum",
+      "Presence of aphthous ulcers",
+      "Presence of pyoderma gangrenosum",
+      "Presence of anal fissure",
+      "Presence of new fistula",
+      "Presence of abscess",
+      "Whether HBI was completed",
+      "HBI: general wellbeing score",
+      "HBI: abdominal pain score",
+      "HBI: number of liquid or soft stools in past 24 hours",
+      "HBI: abdominal mass score",
+      "HBI: arthralgia score",
+      "Harvey-Bradshaw Index (HBI) total score",
+      "Hispanic or Latino origin",
+      "History of breast cancer",
+      "History of cholangiocarcinoma",
+      "History of colon or rectal cancer",
+      "History of Hodgkin's lymphoma",
+      "History of liver cancer",
+      "History of lung cancer",
+      "History of lymphoma (NOS)",
+      "History of non-Hodgkin's lymphoma",
+      "History of ovarian cancer",
+      "History of prostate cancer",
+      "History of celiac disease",
+      "History of chronic bronchitis",
+      "History of dermatitis herpetiformis",
+      "History of familial Mediterranean fever",
+      "History of Graves' disease",
+      "History of Guillain-Barré syndrome",
+      "History of Hashimoto's thyroiditis",
+      "History of idiopathic pulmonary fibrosis",
+      "History of idiopathic thrombocytopenic purpura",
+      "History of irritable bowel syndrome",
+      "History of alopecia areata",
+      "History of multiple sclerosis",
+      "History of myasthenia gravis",
+      "History of myocarditis",
+      "History of neuropathy",
+      "History of pericarditis",
+      "History of pemphigus vulgaris",
+      "History of pernicious anemia",
+      "History of polymyositis or dermatomyositis",
+      "History of primary biliary cirrhosis",
+      "History of primary sclerosing cholangitis",
+      "History of ankylosing spondylitis",
+      "History of psoriasis",
+      "History of rheumatoid arthritis",
+      "History of sarcoidosis",
+      "History of scleroderma / systemic sclerosis",
+      "History of Sjögren's syndrome",
+      "History of systemic lupus erythematosus",
+      "History of temporal arteritis",
+      "History of thyroid disease (uncertain diagnosis)",
+      "History of type I (juvenile) diabetes",
+      "History of vitiligo",
+      "History of arthritis (uncertain diagnosis)",
+      "History of Wegener's granulomatosis",
+      "History of asthma",
+      "History of autoimmune hemolytic anemia",
+      "History of autoimmune hepatitis",
+      "History of Behçet's syndrome",
+      "Whether patient signed informed consent",
+      "Whether subject withdrew from the study",
+      "Whether subject was terminated by investigator",
+      "Reason for withdrawal or termination",
+      "Partial endoscopy performed",
+      "Baseline Montreal classification location",
+      "Explanation for 'other' responses",
+      "Self-reported race",
+      "Presence of arthralgias (joint pain)",
+      "Presence of pyoderma gangrenosum (follow-up)",
+      "Presence of erythema nodosum (follow-up)",
+      "Presence of uveitis (follow-up)",
+      "Whether SCCAI was completed",
+      "SCCAI: bowel frequency during the day",
+      "SCCAI: bowel frequency during the night",
+      "SCCAI: urgency of defecation",
+      "SCCAI: blood in the stool",
+      "SCCAI: general well-being in past 24 hours",
+      "Simple Clinical Colitis Activity Index (SCCAI) total score",
+      "Partial endoscopy performed (follow-up)",
+      "Biological sex",
+      "Specified race (free text)",
+      "Whether stool sample was collected",
+      "Tube A collected for DNA/RNA analysis",
+      "Tube A collected for metabolomics",
+      "Tube A collected for storage",
+      "Tube A collected for viromics",
+      "Tube B collected for fecal calprotectin",
+      "Fecal calprotectin measurement",
+      "Tube B collected for proteomics",
+      "Viromics sample received at Baylor",
+      "Fecal calprotectin sample received at MGH",
+      "Proteomics sample received at LBNL",
+      "Stool sample ID for tube A (EtOH)",
+      "Sample ID for tube B (no preservative)",
+      "Tubes A and B received at Broad Institute"
+    ),
+    removed = c(
+      TRUE, FALSE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE,
+      TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE
+    )
+  ) |>
+  mutate(new_variable = case_when(
+    new_variable == "external_id" ~ "uid",
+    new_variable == "participant_id" ~ "pid",
+    TRUE ~ new_variable
+  ))
+
+IBD_dictionary |> gt(caption = "Dictionary for the metadata variables in the IBD dataset") |>
+  tab_options(container.height = px(800))
+
+```
+
+
+```{r}
+
+samples <-
+  samples |> 
+  rownames_to_column("sample_id") |>
+  dplyr::rename(uid = sample_id, pid = participant_id) |>
+  column_to_rownames("uid")
+
+```
+
+
 Finally, we can create the `phyloseq` object using the `otu_table`, `tax_table`, and `sample_data` functions from the `phyloseq` package.
 
 ```{r}
@@ -281,11 +658,15 @@ ps_ibd
 
 ```
 
-## IBS dataset
+## IBS dataset (Mars et al., 2020)
 
-The irritable bowel syndrome (IBS) dataset was obtained from [Mendeley data](https://data.mendeley.com/datasets/29n2z5r5ph/3) plateform. For the analyses, we have the following datasets at our disposal:
+The irritable bowel syndrome (IBS) dataset in Mars et al. (2020) was obtained from [Mendeley data](https://data.mendeley.com/datasets/29n2z5r5ph/3) plateform. 
 
-- `metagenomics.xlsx`: contains the metagenomics count data and metadata for biopsy samples, in CSV format. This correspond to the file "Supplementary data I Microbiome data tables stool and biopsy.xlsx" in the plateform (version 3 from 2020-03-11).
+Metagenomics were performed for 474 stool samples recolted from 77 participants, separated into healthy controls (H),  constipation predominant (IBS-C), diarrhea predominant (IBS-D), or mixed (IBS-M). DNA was extracted from stool samples using the QIAGEN PowerSoil kit and quantified by NanoDrop and PicoGreen assays. Shotgun metagenomic libraries were prepared using a modified Nextera XT protocol and sequenced on either a HiSeq 2500 or NextSeq platform with single-end reads. Samples from three cohorts were randomly distributed across two sequencing runs to reduce batch effects. Reads were trimmed to 100 bp and aligned to a prokaryotic reference genome collection at 97% identity using BURST, with low-depth samples (< 10,000 reads) removed. Functional profiles were generated using KEGG Orthology annotations, and low-abundance gene estimates were further improved using SHOGUN.
+
+For the analyses, we have the following datasets at our disposal:
+
+- `metagenomics.xlsx`: contains the **metagenomics count data** and metadata for biopsy samples, in CSV format. This correspond to the file "Supplementary data I Microbiome data tables stool and biopsy.xlsx" in the plateform (version 3 from 2020-03-11).
 
 In the chunk below, we import the metadata and abundance data for the IBS dataset.
 
@@ -376,6 +757,70 @@ abundance |> head() |> select(1:5)
 
 ```
 
+We check if there are any singletons (i.e., taxa that are present in only one sample) in the dataset, and if so, we document them by showing the taxonomic annotation and the number of samples with this annotation.
+
+```{r}
+#| fig-height: 4
+#| fig-width: 6
+
+abundance |> 
+  rownames_to_column("taxon") |>
+  pivot_longer(-taxon, names_to = "sample_id", values_to = "counts") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = counts / sum(counts)) |>
+  ungroup() |>
+  select(-counts) |>
+  filter(rel_ab > 0.05) |>
+  group_by(taxon) |>
+  mutate(singleton = ifelse(n() == 1, "Singleton", "Non-singleton")) |>
+  ungroup() |>
+  filter(singleton == "Singleton") |>
+  ggplot() +
+  aes(x = taxon, y = sample_id, fill = rel_ab) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue", labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Taxon", y = "Sample ID", fill = "Relative abundance",
+       subtitle = "Singleton taxa where rel_ab > 5% (present in only one sample)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
+We also document the distribution of the number of taxa per sample, as well as the mean counts across samples over all taxa.
+
+```{r}
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  filter(rel_ab > 0) |>
+  group_by(sample_id) |>
+  summarise(n_taxa = n()) |>
+  ggplot() +
+  aes(x = n_taxa) +
+  geom_histogram(bins = 30) +
+  labs(x = "Number of taxa", y = "Number of samples",
+       subtitle = "Distribution of the number of taxa per sample") +
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  group_by(sample_id) |>
+  summarise(mean_count = mean(count)) |>
+  ggplot() +
+  aes(x = mean_count |> log10()) +
+  geom_histogram(bins = 30) +
+  labs(x = "Mean counts", y = "Number of samples",
+       subtitle = "Distribution of the mean counts across samples") +
+
+  plot_layout(nrow = 2)
+
+```
+
 We filter duplicates in taxonomy to keep only one row for each taxon, and to set the taxon names as row names.
 
 ```{r}
@@ -389,26 +834,157 @@ taxonomy |> glimpse()
 
 ```
 
-For sample (metadata) data, we only keep relevant metadata variables for our analyses, and we set the sample IDs as row names. The selected variables are: 
+For sample (metadata) data, we will only keep relevant metadata variables for our analyses, and we set the sample IDs as row names. We document the original metadata variables below.
 
-- `SampleID`: the sample ID, which will be set as row names.
-- `study_id`: the participant ID, which can be used to link samples from the same participant.
-- `Timepoint`: the time points of the sample collection. Originally encoded as "1st" and "2nd", we will rename them "1" and "2" for easier handling.
-- `Cohort`: the cohort to which the sample belongs. It consists of three levels: "H" for healthy controls, "D" for IBS patients for which the stool form was classified as predominantly diarrhea, and "C" for IBS patients for which the stool form was classified as predominantly constipation. Since we work only with biopsy samples, "C" and "D" levels will be merged into a single level "IBS" for the analyses.
+```{r}
+
+samples <- metadata |> clean_names()
+
+```
+
+
+```{r}
+
+samples |>
+  ggplot() +
+  aes(x = cohort, y = age, color = cohort, fill = cohort) +
+  geom_violin(alpha = 0.6, color = NA) +
+  geom_point(position = position_jitter(width = 0.2), size = 2, alpha = 0.8) +
+  scale_color_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  scale_fill_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  labs(x = "", y = "Age", color = "Cohort", fill = "Cohort",
+       subtitle = "Distribution of age across cohorts") +
+  theme(
+    axis.text.x = element_blank()
+  ) +
+  
+samples |>
+  ggplot() +
+  aes(x = cohort, y = bmi, color = cohort, fill = cohort) +
+  geom_violin(alpha = 0.6, color = NA) +
+  geom_point(position = position_jitter(width = 0.2), size = 2, alpha = 0.8) +
+  scale_color_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  scale_fill_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  labs(x = "", y = "BMI", color = "Cohort", fill = "Cohort",
+       subtitle = "Distribution of BMI across cohorts") +
+  theme(
+    axis.text.x = element_blank()
+  ) +
+  
+  samples |>
+  ggplot() +
+  aes(x = gender, fill = cohort) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  labs(x = "", y = "Count", color = "Cohort", fill = "Cohort",
+       subtitle = "Distribution of gender across cohorts") +
+  
+  samples |>
+  ggplot() +
+  aes(x = cohort, fill = cohort) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  labs(x = "", y = "Count", color = "Cohort", fill = "Cohort",
+       subtitle = "Distribution of samples across cohorts") +
+   theme(
+    axis.text.x = element_blank()
+  ) +
+  
+  plot_layout(nrow = 2)
+
+```
+
 
 ```{r}
 
 samples <-
   metadata |>
   clean_names() |>
-  select(sample_id, study_id, timepoint, cohort) |>
-  mutate(cohort = ifelse(cohort %in% c("C", "D"), "IBS", cohort),
-         cohort = cohort |> factor()) |>
-  mutate(timepoint = str_replace_all(timepoint, c("1st" = "1", "2nd" = "2")),
-         timepoint = timepoint |> factor()) |>
-  column_to_rownames("sample_id")
+  mutate(group = ifelse(cohort %in% c("C", "D"), "IBS", cohort),
+         group = group |> factor()) |>
+  mutate(time = str_replace_all(timepoint, c("1st" = "1", "2nd" = "2")),
+         time = time |> factor())
 
 ```
+
+
+```{r}
+
+samples |>
+  group_by(study_id, cohort) |>
+  summarize(n_samples = n()) |>
+  ungroup() |>
+  ggplot() +
+  aes(y = study_id |> factor(), x = n_samples, fill = cohort) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(
+    values = c("H" = "#0078B9", "C" = "#EA0017", "D" = "#EA8777"),
+    labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
+    ) +
+  scale_x_continuous(breaks = scales::breaks_width(1)) +
+  labs(y = "Subject ID", x = "Number of samples",
+       subtitle = "Number of samples per subject")
+
+```
+
+We construct below a dictionary to keep track of the metadata variables, their meaning, the values they can take, and if they are kept for further analyses or not.
+
+```{r}
+
+dictionary_ibs <- 
+  tibble(
+  orginal_variables = metadata |> names(),
+  new_variables = c("uid", "pid", "time", "id_on_tube", "group", "age", "bmi", "gender"),
+  description =
+  c("Unique identifier for each sample",
+    "Participant ID",
+    "Time points of the sample collection, originally encoded as '1st' and '2nd', renamed '1' and '2'",
+    "ID on tube",
+    "Cohort to which the sample belongs, with three levels: 'H' for healthy controls, 'D' for IBS patients with predominantly diarrhea stool form, and 'C' for IBS patients with predominantly constipation stool form. For analyses, 'C' and 'D' levels will be merged into a single level 'IBS'.",
+    "Age of the participant at the time of sample collection",
+    "Body mass index (BMI) of the participant at the time of sample collection (calculated as weight in kg divided by height in m squared)",
+    "Self-declared gender, with two levels male (M) and female (F)"
+    ),
+  removed = 
+  c(FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, TRUE, TRUE)
+  )
+
+dictionary_ibs |> gt(caption = "Dictionary of metadata variables for the IBS dataset")
+
+```
+
+
+```{r}
+
+samples <-
+  samples |>
+  select(sample_id, study_id, time, cohort, group) |>
+  dplyr::rename(
+    uid = sample_id,
+    pid = study_id
+  ) |>
+  column_to_rownames("uid")
+
+```
+
 We will then rarefy the IBS dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
 
 First, we separate the dataset into two groups: "healthy" and "diseased" so that rarefaction (and prevalence filtering) is performed separately for the two groups, to avoid biasing the results by removing more samples from one group than the other.
@@ -468,32 +1044,32 @@ We will rarefy at a depth of median(depth)/2; this is done in the chucks below, 
 
 ```{r}
 
-# for healthy samples
-
-tmp_depth <- tmp_healthy |>
-  group_by(sample_id) |>
-  summarise(depth = sum(count), .groups = "drop")
-
-min_depth <- median(tmp_depth$depth) / 2 |> round()
-
-samples_to_keep <- tmp_depth |>
-  filter(depth >= min_depth) |>
-  pull(sample_id)
-
-cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
-
-tmp_rarefied_healthy <- tmp_healthy |>
-    filter(sample_id %in% samples_to_keep) |>
-    select(sample_id, taxon, count) |>
-    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
-    column_to_rownames("sample_id") |>
-    rrarefy(sample = min_depth) |>
-    as.data.frame() |>
-    rownames_to_column("sample_id") |>
-    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
-    group_by(sample_id) |>
-    mutate(rel_ab = count / sum(count)) |>
-    ungroup()
+# # for healthy samples
+# 
+# tmp_depth <- tmp_healthy |>
+#   group_by(sample_id) |>
+#   summarise(depth = sum(count), .groups = "drop")
+# 
+# min_depth <- median(tmp_depth$depth) / 2 |> round()
+# 
+# samples_to_keep <- tmp_depth |>
+#   filter(depth >= min_depth) |>
+#   pull(sample_id)
+# 
+# cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+# 
+# tmp_rarefied_healthy <- tmp_healthy |>
+#     filter(sample_id %in% samples_to_keep) |>
+#     select(sample_id, taxon, count) |>
+#     pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+#     column_to_rownames("sample_id") |>
+#     rrarefy(sample = min_depth) |>
+#     as.data.frame() |>
+#     rownames_to_column("sample_id") |>
+#     pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+#     group_by(sample_id) |>
+#     mutate(rel_ab = count / sum(count)) |>
+#     ungroup()
 
 ```
 
@@ -501,45 +1077,43 @@ tmp_rarefied_healthy <- tmp_healthy |>
 ```{r}
 
 # for diseased samples
-
-tmp_depth <- tmp_diseased |>
-  group_by(sample_id) |>
-  summarise(depth = sum(count), .groups = "drop")
-
-min_depth <- median(tmp_depth$depth) / 2 |> round()
-
-samples_to_keep <- tmp_depth |>
-  filter(depth >= min_depth) |>
-  pull(sample_id)
-
-cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
-
-tmp_rarefied_diseased <- tmp_diseased |>
-    filter(sample_id %in% samples_to_keep) |>
-    select(sample_id, taxon, count) |>
-    pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
-    column_to_rownames("sample_id") |>
-    rrarefy(sample = min_depth) |>
-    as.data.frame() |>
-    rownames_to_column("sample_id") |>
-    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
-    group_by(sample_id) |>
-    mutate(rel_ab = count / sum(count)) |>
-    ungroup()
+# 
+# tmp_depth <- tmp_diseased |>
+#   group_by(sample_id) |>
+#   summarise(depth = sum(count), .groups = "drop")
+# 
+# min_depth <- median(tmp_depth$depth) / 2 |> round()
+# 
+# samples_to_keep <- tmp_depth |>
+#   filter(depth >= min_depth) |>
+#   pull(sample_id)
+# 
+# cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+# 
+# tmp_rarefied_diseased <- tmp_diseased |>
+#     filter(sample_id %in% samples_to_keep) |>
+#     select(sample_id, taxon, count) |>
+#     pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+#     column_to_rownames("sample_id") |>
+#     rrarefy(sample = min_depth) |>
+#     as.data.frame() |>
+#     rownames_to_column("sample_id") |>
+#     pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+#     group_by(sample_id) |>
+#     mutate(rel_ab = count / sum(count)) |>
+#     ungroup()
 
 ```
-
-> If one sample is deleted, say 1000v2 (timepoint 2), do I have to delete the other sample from the same participant? And is rarefaction really needed here?
 
 We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together.
 
 ```{r}
 
-abundance <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
-  select(sample_id, taxon, count) |>
-  arrange(sample_id) |>
-  pivot_wider(names_from = taxon, values_from = count) |>
-  column_to_rownames("sample_id")
+# abundance <- bind_rows(tmp_rarefied_healthy, tmp_rarefied_diseased) |>
+#   select(sample_id, taxon, count) |>
+#   arrange(sample_id) |>
+#   pivot_wider(names_from = taxon, values_from = count) |>
+#   column_to_rownames("sample_id")
 
 abundance |> head() |> select(1:5)
 
@@ -555,13 +1129,12 @@ samples |> glimpse()
 
 ```
 
-
 Finally, we can create the `phyloseq` object using the `otu_table`, `tax_table`, and `sample_data` functions from the `phyloseq` package.
 
 ```{r}
 
 ps_ibs <- phyloseq(
-  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
   tax_table(as.matrix(taxonomy)),
   sample_data(samples)
 )
@@ -570,12 +1143,24 @@ ps_ibs
 
 ```
 
+## CRC dataset (Yachida et al., 2019)
 
-## CRC dataset
+The colorectal cancer (CRC) dataset in Yashida et al. (2019) was obtained from the DDBJ Sequence Read Archive (DRA) under the names [DRA006684](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA006684) and [DRA008156](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA008156); however, those are raw sequencing data, and the authors mentioned having used only processed datasets.
 
-The colorectal cancer (CRC) dataset was obtained from the DDBJ Sequence Read Archive (DRA) under the names [DRA006684](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA006684) and [DRA008156](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA008156); however, those are raw sequencing data, and the authors mentioned having used only processed datasets.
+Processed datasets seems to be available as [Supplementary Tables](https://www.nature.com/articles/s41591-019-0458-7#Sec23), therefore these will be used for the subsequent analyses.
 
-Processed datasets seems to be available as [Supplementary Tables](https://www.nature.com/articles/s41591-019-0458-7#Sec23) in (cite), so I will use those for the analyses. Therefore, we have the following datasets at our disposal:
+Stool samples were collected after bowel prep and stored on dry ice. DNA was extracted using bead-beating with a GNOME kit, quality-checked by TapeStation, and stored at −80°C. Sequencing libraries were prepared with the Nextera XT kit and verified for quality before paired-end whole-genome shotgun sequencing on an Illumina HiSeq 2500, generating 150 bp reads with a target output of 5 Gb per sample.
+
+The samples were classified into nine groups according to colonoscopic and histological findings: 
+
+- normal (no remarkable colonoscopic findings) and a few polyps (up to two small (<5 mm) polyps) were classified as "Healthy";
+- multiple polypoid adenomas with low-grade dysplasia and polypoid adenoma(s) with high-grade dysplasia were classified as "MP";
+- stage 0 CRC was classified as "Stage_0"; 
+- stage I CRC and stage II CRC were classified as "Stage_I_II"; 
+- stage III CRC and stage IV CRC were classified as "Stage_III_IV". 
+- the remaining group was normal with a history of colorectal surgery, and was classified as "HS".
+
+We have the following datasets at our disposal:
 
 - `41591_2019_458_MOESM3_ESM.xlsx`: contains the processed datasets for stool samples, in Excel format. This correspond to the file "Supplementary data 3.xlsx" in the article (version 1 from 2019-11-28).
 
@@ -606,6 +1191,7 @@ Now, we see that we have `r nrow(metadata)`samples in metadata, and `r ncol(abun
 setdiff(metadata$Subject_ID, colnames(abundance))
 
 ```
+
 After checking manually, we see that this sample is present in the metadata, but not in the abundance data, so we can simply filter it out from the metadata.
 
 ```{r}
@@ -696,15 +1282,6 @@ metadata |>
 
 ```
 
-They classified the samples into nine groups according to colonoscopic and histological findings: 
-
-- normal (no remarkable colonoscopic findings) and a few polyps (up to two small (<5 mm) polyps) were classified as "Healthy";
-- multiple polypoid adenomas with low-grade dysplasia and polypoid adenoma(s) with high-grade dysplasia were classified as "MP";
-- stage 0 CRC was classified as "Stage_0"; 
-- stage I CRC and stage II CRC were classified as "Stage_I_II"; 
-- stage III CRC and stage IV CRC were classified as "Stage_III_IV". 
-- the remaining group was normal with a history of colorectal surgery, and was classified as "HS".
-
 We filter the metadata to keep only the selected variables, and set the sample IDs as row names.
 
 ```{r}
@@ -733,6 +1310,21 @@ samples |> glimpse()
 
 ```
 
+
+```{r}
+
+samples |> 
+  rownames_to_column("sample_id") |>
+  group_by(cohort) |>
+  summarise(n_samples = n()) |>
+  ggplot() +
+  aes(x = cohort, y = n_samples, fill = cohort) +
+  geom_bar(stat = "identity") +
+  labs(x = "Cohort", y = "Number of samples", fill = "Cohort",
+       subtitle = "Number of samples per cohort")
+
+```
+
 We also filter abundance data to keep only samples for which we have a clear health status in the metadata.
 
 ```{r}
@@ -742,6 +1334,31 @@ abundance <- abundance |> select(any_of(rownames(samples)))
 abundance |> head() |> select(1:5)
 
 ```
+
+We check if there are any singletons (i.e., taxa that are present in only one sample) in the dataset, and if so, we document them by showing the taxonomic annotation and the number of samples with this annotation.
+
+```{r}
+
+abundance |> 
+  rownames_to_column("taxon") |>
+  pivot_longer(-taxon, names_to = "sample_id", values_to = "rel_ab") |>
+  filter(rel_ab > 0.05) |>
+  group_by(taxon) |>
+  mutate(singleton = ifelse(n() == 1, "Singleton", "Non-singleton")) |>
+  ungroup() |>
+  filter(singleton == "Singleton") |>
+  ggplot() +
+  aes(x = taxon, y = sample_id, fill = rel_ab) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue", labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Taxon", y = "Sample ID", fill = "Relative abundance",
+       subtitle = "Singleton taxa where rel_ab > 5% (present in only one sample)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
 
 Finally, we can create the `phyloseq` object using the `otu_table`, `tax_table`, and `sample_data` functions from the `phyloseq` package.
 
@@ -758,9 +1375,12 @@ ps_crc
 ```
 
 
-## CDI dataset
+## CDI dataset (Ferretti et al., 2023)
 
-The *Clostridium difficile* infection (CDI) metagenomics dataset was obtained from the [Github repository](https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI) associated with the original article (cite). [indicate the date of the latest version for these datasets]. For the analysis, we have the following datasets at our disposal: 
+The *Clostridium difficile* infection (CDI) metagenomics dataset was obtained from the [Github repository](https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI) associated with the original article from Ferretti et al. (2023). [indicate the date of the latest version for these datasets]. 
+
+
+For the analysis, we have the following datasets at our disposal: 
 
 - `CDI_mergedControl_samples.csv`: contains metadata for both control and CDI samples, in CSV format.
 - `mOTU20_profiles_filteredCDI.csv`: contains abundance count data for stool samples, in CSV format.

@@ -2,24 +2,22 @@
 title: "Network inference"
 author:
   - Mariam Rahali Masbouri
-date: today 
-format:
-  html:
-    page-layout: full
-    code-fold: true
-    toc: true
-    toc-location: left
-    theme: cosmo
-    number-sections: true
-    embed-resources: true
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
 execute:
-  cache: false 
+  cache: true
   warning: false
-project:
-  execute-dir: project
+knitr:
+  opts_chunk:
+    out.width: "100%"
 editor: source
-editor_options: 
-  chunk_output_type: inline
 ---
 
 ```{r}
@@ -34,6 +32,7 @@ library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
 library(readxl)
 library(tibble)
 library(ggplot2)
+library(patchwork)
 library(dplyr)
 library(tidyverse)
 library(tidyr)

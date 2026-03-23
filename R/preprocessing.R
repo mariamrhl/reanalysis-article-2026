@@ -32,7 +32,7 @@ filter_prevalence <- function(df, prevalence_threshold = 0.2) {
   
   df |>
     mutate(taxon = ifelse(taxon %in% taxa_to_keep, taxon, "Other")) |>
-    group_by(sample_id, taxon) |>
+    group_by(uid, taxon) |>
     summarise(rel_ab = sum(rel_ab), .groups = "drop")
   
 }
@@ -52,6 +52,6 @@ filter_abundance <- function(df, abundance_threshold = 0.001) {
   
   df |>
     mutate(taxon = ifelse(taxon %in% taxa_to_keep, taxon, "Other")) |>
-    group_by(sample_id, taxon) |>
+    group_by(uid, taxon) |>
     summarise(rel_ab = sum(rel_ab), .groups = "drop")
 }

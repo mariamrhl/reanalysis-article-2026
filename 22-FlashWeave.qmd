@@ -24,9 +24,18 @@ editor_options:
 
 In this section, we will apply FlashWeave to the different cohorts separately.
 
-## IBD cohort
+```{r}
+#| include: false
 
-> A sample (starting with H) has a taxon with relative abundance == 1.
+library(JuliaCall)
+julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
+julia_eval('using FlashWeave')
+julia_eval('import FlashWeave: learn_network, save_network, load_data')
+julia_eval('println(methods(learn_network))')
+
+```
+
+## IBD cohort
 
 We first import the IBD dataset from the MAE object in the chunk code below.
 
@@ -37,16 +46,14 @@ tmp <-
   assay() |>
   t() |>
   as.data.frame() |>
-  rownames_to_column("sample_id") |>
-  pivot_longer(-sample_id, names_to = "taxon", values_to = "rel_ab") |>
+  rownames_to_column("uid") |>
+  pivot_longer(-uid, names_to = "taxon", values_to = "rel_ab") |>
   left_join(
-    mae[["IBD"]] |> colData() |> as_tibble(rownames = "sample_id") |> select(sample_id, participant_id, visit_num, diagnosis),
-    by = join_by(sample_id)
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
+    by = join_by(uid)
   )
 
 ```
-
-### Prevalence filtering
 
 We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
 
@@ -64,9 +71,8 @@ tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
 tmp_filtered_healthy <- 
   filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
   left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
-      select(sample_id, participant_id, visit_num, diagnosis),
-    by = join_by(sample_id)
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
+    by = join_by(uid)
   )
 
 ```
@@ -78,12 +84,12 @@ tmp_filtered_healthy <-
 tmp_filtered_diseased <- 
   filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
   left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "sample_id") |> 
-      select(sample_id, participant_id, visit_num, diagnosis),
-    by = join_by(sample_id)
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
+    by = join_by(uid)
   )
 
 ```
+
 
 ```{r}
 
@@ -91,9 +97,9 @@ tmp_filtered_diseased <-
 
 healthy_df <-
   tmp_filtered_healthy |>
-  select(sample_id, taxon, rel_ab) |>
+  select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("sample_id") |>
+  column_to_rownames("uid") |>
   t()
 
 ```
@@ -105,38 +111,1090 @@ healthy_df <-
 
 diseased_df <-
   tmp_filtered_diseased |>
-  select(sample_id, taxon, rel_ab) |>
+  select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("sample_id") |>
+  column_to_rownames("uid") |>
   t()
 
 ```
 
 
-### Network inference with FlashWeave (test run)
+For healthy samples, we will run FlashWeave with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
 
 ```{r}
 
-julia_eval('import Pkg')
-julia_eval('Pkg.rm("FlashWeave")')
-julia_eval('Pkg.add("FlashWeave")')
-julia_eval('Pkg.build("FlashWeave")')
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
 
-library(JuliaCall)
-julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
-julia_eval('using FlashWeave')
-julia_eval('import FlashWeave: learn_network, save_network, load_data')
-julia_eval('println(methods(learn_network))')
+```
+
+We save the results in an RDS file for later use.
+
+```{r}
+
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy.rds"))
+
+```
+
+The results are imported in the chunk code below.
+
+```{r}
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy.rds"))
+
+```
+
+The results are obtained in the chunk code below.
+
+```{r}
+
+df_res_healthy <- get_flashweave_results(res_healthy)
+
+```
+
+For diseased samples, we will run FlashWeave with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+
+```
+
+We save the results in an RDS file for later use.
+
+```{r}
+
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased.rds"))
+
+```
+
+The results are imported in the chunk code below.
+
+```{r}
+
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased.rds"))
+
+```
+
+The results are obtained in the chunk code below.
+
+```{r}
+
+df_res_diseased <- get_flashweave_results(res_diseased)
 
 ```
 
 
 ```{r}
 
-res <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 1, subsample_pcts = 0.4, max_attempts = 5)
-
-df_res <- get_flashweave_results(res)
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
 
 ```
 
+We plot the results below.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+# PEP plot
+
+df_res |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  df_res |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  patchwork::plot_layout(nrow = 2)
+
+```
+
+We will now check if there is any correlation between Sheldon eveness and PEP in the plot below.
+
+```{r}
+
+df_res |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
+
+We will now perform the network analysis on top taxa selected based on their relative abundance. We select a data-driven threshold for relative abundance, which is shown in the plot below. We will keep taxa with a mean relative abundance of at least 0.001 (that is, log10 mean relative abundance of -3). This threshold correspond to the moment when the count starts to drop. Taxa with a mean relative abundance below this threshold will be grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+# find data-driven threshold for relative abundance
+
+tmp |>
+  group_by(taxon) |>
+  summarise(mean_rel_ab = mean(rel_ab)) |>
+  arrange(desc(mean_rel_ab)) |>
+  ggplot() +
+  aes(x = mean_rel_ab |> log10()) +
+  geom_histogram(bins = 30) +
+  geom_vline(xintercept = -3, linetype = "dashed", color = "red") +
+  labs(x = "log10 mean relative abundance", y = "count",
+       caption = "The vertical dashed red line indicates the selected threshold for mean relative abundance (0.001)")
+
+```
+
+```{r}
+# filter taxa based on mean relative abundance
+
+tmp_filtered_healthy_top <- 
+  filter_abundance(tmp_healthy, abundance_threshold = 0.001) |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
+    by = join_by(uid)
+  )
+
+tmp_filtered_diseased_top <-
+  filter_abundance(tmp_diseased, abundance_threshold = 0.001) |>
+  left_join(
+    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
+    by = join_by(uid)
+  )
+
+```
+We run the FlashWeave network inference on the top taxa for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+
+healthy_df_top <-
+  tmp_filtered_healthy_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+diseased_df_top <-
+  tmp_filtered_diseased_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+
+```{r}
+
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_top.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_top.rds"))
+
+```
+
+We load the results in the chunk code below.
+
+```{r}
+
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_top.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_top.rds"))
+
+```
+
+The results are obtained in the chunk code below.
+
+```{r}
+
+df_res_healthy_top <- get_flashweave_results(res_healthy_top)
+df_res_diseased_top <- get_flashweave_results(res_diseased_top)
+
+df_res_top <-
+  bind_rows(
+    df_res_healthy_top |> mutate(group = "Healthy"),
+    df_res_diseased_top |> mutate(group = "Diseased")
+  )
+
+```
+
+We plot the results below.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+
+# PEP plot
+
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  patchwork::plot_layout(nrow = 2)
+
+```
+
+```{r}
+
+df_res_top |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6, size = 1) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
+
+
+## IBS cohort
+
+```{r}
+
+tmp <-
+  mae[["IBS"]] |> 
+  assay() |> 
+  t() |> 
+  as.data.frame() |> 
+  rownames_to_column("uid") |> 
+  pivot_longer(-uid, names_to = "taxon", values_to = "count") |>
+  group_by(uid) |>
+  mutate(rel_ab = count/sum(count)) |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, time, cohort), 
+    by = join_by(uid)
+  )
+
+```
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(cohort == "H")
+tmp_diseased <- tmp |> filter(cohort == c("C", "D"))
+
+```
+
+
+```{r}
+# for healthy samples
+
+tmp_filtered_healthy <- 
+  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, time, cohort), 
+    by = join_by(uid)
+  )
+
+```
+
+
+```{r}
+# for diseased samples
+
+tmp_filtered_diseased <- 
+  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["IBS"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, time, cohort), 
+    by = join_by(uid)
+  )
+
+```
+
+
+```{r}
+
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+
+```{r}
+
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+We run the FlashWeave network inference for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+# 
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.8, 0.9), max_attempts = 120)
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.7, 0.8), max_attempts = 120)
+# 
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBS.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBS.rds"))
+
+```
+
+
+::: {.callout-important}
+The IBS cohort has only 21 samples for the healthy cohorts, which is not sufficient to run FlashWeave with the selected parameters. A solution can be to modify the max_k parameter, at the cost of inflating the number of indirect edges.
+:::
+
+## CDI cohort
+
+```{r}
+
+tmp <-
+  mae[["CDI"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("uid") |>
+  pivot_longer(-uid, names_to = "taxon", values_to = "count") |>
+  group_by(uid) |>
+  mutate(rel_ab = count/sum(count)) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
+    by = join_by(uid)
+  ) |>
+  filter(subject_disease_status == "CDI" | subject_disease_status == "CTR")
+
+
+```
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(subject_disease_status == "CTR")
+tmp_diseased <- tmp |> filter(subject_disease_status == "CDI")
+
+# for healthy samples
+
+tmp_filtered_healthy <- 
+  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
+    by = join_by(uid)
+  )
+
+# for diseased samples
+
+tmp_filtered_diseased <- 
+  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
+    by = join_by(uid)
+  )
+
+```
+
+
+```{r}
+
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+We run the FlashWeave network inference for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# 
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CDI.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CDI.rds"))
+
+```
+
+We load the results in the chunk code below.
+
+```{r}
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI.rds"))
+
+```
+
+The results are obtained in the chunk code below.
+
+```{r}
+
+df_res_healthy <- get_flashweave_results(res_healthy)
+df_res_diseased <- get_flashweave_results(res_diseased)
+
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
+
+```
+
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+
+df_res |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+df_res |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  patchwork::plot_layout(nrow = 2)
+
+  
+```
+
+```{r}
+
+df_res |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6, size = 1) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
+
+We will now perform the network analysis on top taxa selected based on their relative abundance. We select a data-driven threshold for relative abundance, which is shown in the plot below. We will keep taxa with a mean relative abundance of at least 0.001 (that is, log10 mean relative abundance of -4). This threshold correspond to the moment when the count starts to drop. Taxa with a mean relative abundance below this threshold will be grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+# find data-driven threshold for relative abundance
+
+tmp |>
+  group_by(taxon) |>
+  summarise(mean_rel_ab = mean(rel_ab)) |>
+  arrange(desc(mean_rel_ab)) |>
+  ggplot() +
+  aes(x = mean_rel_ab |> log10()) +
+  geom_histogram(bins = 30) +
+  geom_vline(xintercept = -3, linetype = "dashed", color = "red") +
+  labs(x = "log10 mean relative abundance", y = "count",
+       caption = "The vertical dashed red line indicates the selected threshold for mean relative abundance (0.00001)")
+
+```
+
+```{r}
+
+# filter taxa based on mean relative abundance
+
+tmp_filtered_healthy_top <- 
+  filter_abundance(tmp_healthy, abundance_threshold = 0.001) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
+    by = join_by(uid)
+  )
+
+tmp_filtered_diseased_top <-
+  filter_abundance(tmp_diseased, abundance_threshold = 0.001) |>
+  left_join(
+    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
+    by = join_by(uid)
+  )
+
+```
+
+We run the FlashWeave network inference on the top taxa for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+
+healthy_df_top <-
+  tmp_filtered_healthy_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+diseased_df_top <-
+  tmp_filtered_diseased_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+
+```{r}
+
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# 
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top.rds"))
+
+```
+
+
+```{r}
+
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top.rds"))
+
+df_res_healthy_top <- get_flashweave_results(res_healthy_top)
+df_res_diseased_top <- get_flashweave_results(res_diseased_top)
+
+df_res_top <-
+  bind_rows(
+    df_res_healthy_top |> mutate(group = "Healthy"),
+    df_res_diseased_top |> mutate(group = "Diseased")
+  )
+
+```
+
+We plot the results below.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+
+# PEP plot
+
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  patchwork::plot_layout(nrow = 2)
+
+```
+
+
+```{r}
+
+df_res_top |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6, size = 1) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
+
+
+## CRC cohort
+
+```{r}
+
+tmp <-
+  mae[["CRC"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("uid") |>
+  pivot_longer(-uid, names_to = "taxon", values_to = "count") |>
+  group_by(uid) |>
+  mutate(rel_ab = count/sum(count)) |>
+  left_join(
+    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
+    by = join_by(uid)
+  )
+
+```
+
+We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+tmp_healthy <- tmp |> filter(cohort == "H")
+tmp_diseased <- tmp |> filter(cohort == "CRC")
+
+# for healthy samples
+
+tmp_filtered_healthy <- 
+  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
+    by = join_by(uid)
+  )
+
+# for diseased samples
+
+tmp_filtered_diseased <- 
+  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
+  left_join(
+    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
+    by = join_by(uid)
+  )
+
+```
+
+
+```{r}
+
+# for healthy samples
+
+healthy_df <-
+  tmp_filtered_healthy |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+# for diseased samples
+
+diseased_df <-
+  tmp_filtered_diseased |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+We run the FlashWeave network inference for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+
+```{r}
+
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# 
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CRC.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CRC.rds"))
+
+```
+
+We load the results in the chunk code below.
+
+```{r}
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC.rds"))
+
+```
+
+```{r}
+
+df_res_healthy <- get_flashweave_results(res_healthy)
+df_res_diseased <- get_flashweave_results(res_diseased)
+
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
+
+```
+
+We plot the results below.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+
+df_res |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+df_res |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+  patchwork::plot_layout(nrow = 2)
+
+```
+
+```{r}
+
+df_res |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6, size = 1) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
+
+We will now perform the network analysis on top taxa selected based on their relative abundance. We select a data-driven threshold for relative abundance, which is shown in the plot below. We will keep taxa with a mean relative abundance of at least 0.001 (that is, log10 mean relative abundance of -3). This threshold was chosen since we need a number of "core" taxa smaller than the number of remaining taxa after prevalence filtering. Taxa with a mean relative abundance below this threshold will be grouped in a category named "Other". This is done in the chunk code below.
+
+```{r}
+
+tmp |>
+  group_by(taxon) |>
+  summarise(mean_rel_ab = mean(rel_ab)) |>
+  arrange(desc(mean_rel_ab)) |>
+  ggplot() +
+  aes(x = mean_rel_ab |> log10()) +
+  geom_histogram(bins = 30) +
+  geom_vline(xintercept = -3, linetype = "dashed", color = "red") +
+  labs(x = "log10 mean relative abundance", y = "count",
+       caption = "The vertical dashed red line indicates the selected threshold for mean relative abundance")
+
+```
+
+```{r}
+
+tmp_filtered_healthy_top <- 
+  filter_abundance(tmp_healthy, abundance_threshold = 10^-3) |>
+  left_join(
+    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
+    by = join_by(uid)
+  )
+
+tmp_filtered_diseased_top <-
+  filter_abundance(tmp_diseased, abundance_threshold = 10^-3) |>
+  left_join(
+    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
+    by = join_by(uid)
+  )
+
+```
+
+```{r}
+
+healthy_df_top <-
+  tmp_filtered_healthy_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+diseased_df_top <-
+  tmp_filtered_diseased_top |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+
+```{r}
+
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# 
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top.rds"))
+
+```
+
+
+```{r}
+
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top.rds"))
+
+```
+
+```{r}
+
+df_res_healthy_top <- get_flashweave_results(res_healthy_top)
+df_res_diseased_top <- get_flashweave_results(res_diseased_top)
+
+df_res_top <-
+  bind_rows(
+    df_res_healthy_top |> mutate(group = "Healthy"),
+    df_res_diseased_top |> mutate(group = "Diseased")
+  )
+
+```
+
+We plot the results below.
+
+```{r}
+#| fig-height: 9
+#| fig-width: 7
+
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = pep, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  
+df_res_top |>
+  ggplot() +
+  aes(x = group, y = sheldon, color = group, fill = group) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold"
+  ) +
+  patchwork::plot_layout(nrow = 2)
+
+```
+
+```{r}
+
+df_res_top |>
+  ggplot() +
+  aes(x = sheldon, y = pep, color = group, fill = group) +
+  geom_point(alpha = 0.6, size = 1) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
+              se = TRUE, inherit.aes = FALSE,
+              color = "black", linetype = "dashed") +
+  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
+                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
+                   size = 3, show.legend = FALSE) +
+  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
+                   inherit.aes = FALSE, color = "black",
+                   label.x.npc = "left", label.y.npc = 0.03,
+                   size = 3) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  facet_wrap(~ fraction) +
+  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group")
+
+```
 

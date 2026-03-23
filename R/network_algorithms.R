@@ -1,5 +1,5 @@
 
-# BEEM-Static function
+# BEEM-Static
 
 run_beem_static <- function(abundance_data, ncpu = 1, scaling = 1000, max_iter = 30, alpha = 1, lambda_choice = 1) {
   
@@ -297,11 +297,18 @@ run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsampl
           iter <- iter + 1
           cat("\n  Bootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
           
+          sheldon_vals <- apply(abundance_sub, 2, function(x) {
+            shannon  <- vegan::diversity(x, index = "shannon")
+            richness <- sum(x > 0)
+            exp(shannon) / richness
+          })
+          sheldon_iter <- mean(sheldon_vals, na.rm = TRUE)
+          
           network_long <- network |>
             as.data.frame() |>
             rownames_to_column("taxon_from") |>
             pivot_longer(-taxon_from, names_to = "taxon_to", values_to = "weight") |>
-            mutate(fraction = pct, iteration = iter)
+            mutate(fraction = pct, iteration = iter, sheldon = sheldon_iter)
           
           all_results <- c(all_results, list(network_long))
         }
@@ -318,7 +325,7 @@ run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsampl
   
   # Combine all results
   final_results <- bind_rows(all_results) |>
-    select(fraction, iteration, taxon_from, taxon_to, weight)
+    select(fraction, iteration, taxon_from, taxon_to, weight, sheldon)
   
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
@@ -354,7 +361,8 @@ get_flashweave_results <- function(bootstrap_results) {
       fraction = unique(df$fraction),
       iteration = unique(df$iteration),
       pep = pep,
-      edge_num = edge_num
+      edge_num = edge_num,
+      sheldon = unique(df$sheldon)
     )
   })
   
