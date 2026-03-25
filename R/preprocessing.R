@@ -37,6 +37,39 @@ filter_prevalence <- function(df, prevalence_threshold = 0.2) {
   
 }
 
+filter_prevalence_matrix <- function(abundance_mat, prevalence_threshold = 0.2, other_label = "Other") {
+  
+  # prevalence per taxon
+  prevalence <- rowMeans(abundance_mat > 0)
+  
+  taxa_to_keep <- names(prevalence[prevalence >= prevalence_threshold])
+  
+  cat(
+    "Keeping", length(taxa_to_keep), "out of",
+    nrow(abundance_mat),
+    "taxa with prevalence >=",
+    prevalence_threshold * 100, "%\n"
+  )
+  
+  # taxa failing threshold
+  taxa_drop <- setdiff(rownames(abundance_mat), taxa_to_keep)
+  
+  if (length(taxa_drop) == 0)
+    return(abundance_mat)
+  
+  # collapse rare taxa into "Other"
+  other_row <- colSums(abundance_mat[taxa_drop, , drop = FALSE])
+  
+  abundance_filtered <- abundance_mat[taxa_to_keep, , drop = FALSE]
+  
+  abundance_filtered <- rbind(
+    abundance_filtered,
+    Other = other_row
+  )
+  
+  return(abundance_filtered)
+}
+
 
 filter_abundance <- function(df, abundance_threshold = 0.001) {
   

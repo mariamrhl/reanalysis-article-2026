@@ -11,16 +11,90 @@ run_beem_static <- function(abundance_data, ncpu = 1, scaling = 1000, max_iter =
   return(inferred_network)
 }
 
-run_beem_static_bootstrap <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.7, 0.8, 0.9), ncpu = 4, scaling = 1000, max_iter = 20, 
-                                      alpha = 1, lambda_choice = 1, max_attempts = 50, output_file = "results/beem_bootstrap.csv") {
+# run_beem_static_bootstrap_old <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.7, 0.8, 0.9), ncpu = 4, scaling = 1000, max_iter = 20, 
+#                                       alpha = 1, lambda_choice = 1, max_attempts = 50, output_file = "results/beem_bootstrap.csv") {
+#   
+#   # Create output directory if it doesn't exist
+#   # dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+#   
+#   n_samples <- ncol(abundance_data)
+#   all_results <- list()
+#   
+#   for (pct in subsample_pcts) {
+#     cat("Running bootstrap with", pct * 100, "% subsampling\n")
+#     
+#     seen_hashes <- new.env(hash = TRUE, parent = emptyenv())
+#     iter <- 0
+#     attempts <- 0
+#     
+#     while (iter < n_bootstrap && attempts < max_attempts) {
+#       
+#       # Sample without replacement
+#       subsample_idx <- sample(seq_len(n_samples), 
+#                               size = floor(n_samples * pct), 
+#                               replace = FALSE)
+#       abundance_sub <- abundance_data[, subsample_idx]
+#       
+#       # Hash to avoid duplicate subsets
+#       subset_hash <- digest::digest(colnames(abundance_sub))
+#       
+#       if (!exists(subset_hash, envir = seen_hashes)) {
+#         assign(subset_hash, TRUE, envir = seen_hashes)
+#         
+#         network <- tryCatch(
+#           run_beem_static(abundance_sub, ncpu = ncpu, scaling = scaling, max_iter = max_iter, alpha = alpha, lambda_choice = lambda_choice),
+#           error = function(e) {
+#             cat("\n  Warning: iteration", iter, "failed:", conditionMessage(e), "\n")
+#             return(NULL)
+#           }
+#         )
+#         
+#         if (!is.null(network)) {
+#           iter <- iter + 1
+#           cat("\n  Bootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
+#           
+#           # Convert matrix to long format and append metadata
+#           network_long <- network |>
+#             as.data.frame() |>
+#             rownames_to_column("taxon_from") |>
+#             pivot_longer(-taxon_from, names_to = "taxon_to", values_to = "weight") |>
+#             mutate(fraction = pct, iteration = iter)
+#           
+#           all_results <- c(all_results, list(network_long))
+#         }
+#       }
+#       attempts <- attempts + 1
+#     }
+#     
+#     if (attempts >= max_attempts) {
+#       cat("\nWarning: max attempts reached at", pct * 100, "%\n")
+#     }
+#     
+#     cat("\n", iter, "/", n_bootstrap, "successful iterations at", pct * 100, "%\n")
+#   }
+#   
+#   # Combine all results and save to single CSV
+#   final_results <- bind_rows(all_results) |>
+#     select(fraction, iteration, taxon_from, taxon_to, weight)
+#   
+#   write.csv(final_results, output_file, row.names = FALSE)
+#   cat("Results saved to", output_file, "\n")
+#   
+#   return(final_results)
+# }
+
+run_beem_static_bootstrap <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.7, 0.8, 0.9), prevalence_threshold = 0.2,
+ncpu = 4, scaling = 1000, max_iter = 20, alpha = 1, lambda_choice = 1, max_attempts = 50, output_file = "results/beem_bootstrap.csv") {
   
-  # Create output directory if it doesn't exist
-  # dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+  library(dplyr)
+  library(tidyr)
+  library(tibble)
   
   n_samples <- ncol(abundance_data)
   all_results <- list()
   
   for (pct in subsample_pcts) {
+    
     cat("Running bootstrap with", pct * 100, "% subsampling\n")
     
     seen_hashes <- new.env(hash = TRUE, parent = emptyenv())
@@ -29,53 +103,104 @@ run_beem_static_bootstrap <- function(abundance_data, n_bootstrap = 500, subsamp
     
     while (iter < n_bootstrap && attempts < max_attempts) {
       
-      # Sample without replacement
-      subsample_idx <- sample(seq_len(n_samples), 
-                              size = floor(n_samples * pct), 
-                              replace = FALSE)
+      # -----------------------------
+      # 1. Subsample samples
+      # -----------------------------
+      subsample_idx <- sample(
+        seq_len(n_samples),
+        size = floor(n_samples * pct),
+        replace = FALSE
+      )
+      
       abundance_sub <- abundance_data[, subsample_idx]
       
-      # Hash to avoid duplicate subsets
       subset_hash <- digest::digest(colnames(abundance_sub))
       
       if (!exists(subset_hash, envir = seen_hashes)) {
+        
         assign(subset_hash, TRUE, envir = seen_hashes)
         
-        network <- tryCatch(
-          run_beem_static(abundance_sub, ncpu = ncpu, scaling = scaling, max_iter = max_iter, alpha = alpha, lambda_choice = lambda_choice),
+        # -----------------------------
+        # 2. Prevalence filtering
+        # -----------------------------
+        abundance_filtered <- tryCatch(
+          apply_prevalence_filter_matrix(
+            abundance_sub,
+            prevalence_threshold = prevalence_threshold
+          ),
           error = function(e) {
-            cat("\n  Warning: iteration", iter, "failed:", conditionMessage(e), "\n")
+            cat("Filtering failed:", conditionMessage(e), "\n")
+            return(NULL)
+          }
+        )
+        
+        n_taxa <- nrow(abundance_filtered)
+        
+        # Skip if too few taxa remain
+        if (is.null(abundance_filtered) ||
+            nrow(abundance_filtered) < 5) {
+          attempts <- attempts + 1
+          next
+        }
+        
+        # -----------------------------
+        # 3. Run BEEM-static
+        # -----------------------------
+        network <- tryCatch(
+          run_beem_static(
+            abundance_filtered,
+            ncpu = ncpu,
+            scaling = scaling,
+            max_iter = max_iter,
+            alpha = alpha,
+            lambda_choice = lambda_choice
+          ),
+          error = function(e) {
+            cat("\nWarning: iteration", iter,
+                "failed:", conditionMessage(e), "\n")
             return(NULL)
           }
         )
         
         if (!is.null(network)) {
-          iter <- iter + 1
-          cat("\n  Bootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
           
-          # Convert matrix to long format and append metadata
+          iter <- iter + 1
+          cat("\nBootstrap", iter, "/", n_bootstrap,
+              "completed (", pct * 100, "% subsampling)\n")
+          
           network_long <- network |>
             as.data.frame() |>
             rownames_to_column("taxon_from") |>
-            pivot_longer(-taxon_from, names_to = "taxon_to", values_to = "weight") |>
-            mutate(fraction = pct, iteration = iter)
+            pivot_longer(
+              -taxon_from,
+              names_to = "taxon_to",
+              values_to = "weight"
+            ) |>
+            mutate(
+              fraction = pct,
+              iteration = iter,
+              n_taxa = n_taxa
+            )
           
           all_results <- c(all_results, list(network_long))
         }
       }
+      
       attempts <- attempts + 1
     }
     
     if (attempts >= max_attempts) {
-      cat("\nWarning: max attempts reached at", pct * 100, "%\n")
+      cat("\nWarning: max attempts reached at",
+          pct * 100, "%\n")
     }
     
-    cat("\n", iter, "/", n_bootstrap, "successful iterations at", pct * 100, "%\n")
+    cat("\n", iter, "/", n_bootstrap,
+        "successful iterations at", pct * 100, "%\n")
   }
   
-  # Combine all results and save to single CSV
   final_results <- bind_rows(all_results) |>
-    select(fraction, iteration, taxon_from, taxon_to, weight)
+    select(fraction, iteration,
+           taxon_from, taxon_to, weight, n_taxa)
   
   write.csv(final_results, output_file, row.names = FALSE)
   cat("Results saved to", output_file, "\n")
@@ -259,12 +384,90 @@ run_flashweave <- function(abundance_data, sensitive = TRUE, heterogeneous = FAL
   return(inferred_network)
 }
 
-run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.4, 0.5, 0.6, 0.7, 0.8), max_attempts = 50, sensitive = TRUE, heterogeneous = FALSE, output_file = NULL) {
+# run_flashweave_bootstrap_old <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.4, 0.5, 0.6, 0.7, 0.8), max_attempts = 50, sensitive = TRUE, heterogeneous = FALSE, output_file = NULL) {
+#   
+#   n_samples <- ncol(abundance_data)
+#   all_results <- list()
+#   
+#   for (pct in subsample_pcts) {
+#     cat("Running bootstrap with", pct * 100, "% subsampling\n")
+#     
+#     seen_hashes <- new.env(hash = TRUE, parent = emptyenv())
+#     iter <- 0
+#     attempts <- 0
+#     
+#     while (iter < n_bootstrap && attempts < max_attempts) {
+#       
+#       # Sample without replacement
+#       subsample_idx <- sample(seq_len(n_samples),
+#                               size = floor(n_samples * pct),
+#                               replace = FALSE)
+#       abundance_sub <- abundance_data[, subsample_idx]
+#       
+#       # Hash to avoid duplicate subsets
+#       subset_hash <- digest::digest(colnames(abundance_sub))
+#       
+#       if (!exists(subset_hash, envir = seen_hashes)) {
+#         assign(subset_hash, TRUE, envir = seen_hashes)
+#         
+#         network <- tryCatch(
+#           run_flashweave(abundance_sub, sensitive = sensitive, heterogeneous = heterogeneous),
+#           error = function(e) {
+#             cat("\n  Warning: iteration", iter, "failed:", conditionMessage(e), "\n")
+#             return(NULL)
+#           }
+#         )
+#         
+#         if (!is.null(network)) {
+#           iter <- iter + 1
+#           cat("\n  Bootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
+#           
+#           sheldon_vals <- apply(abundance_sub, 2, function(x) {
+#             shannon  <- vegan::diversity(x, index = "shannon")
+#             richness <- sum(x > 0)
+#             exp(shannon) / richness
+#           })
+#           sheldon_iter <- mean(sheldon_vals, na.rm = TRUE)
+#           
+#           network_long <- network |>
+#             as.data.frame() |>
+#             rownames_to_column("taxon_from") |>
+#             pivot_longer(-taxon_from, names_to = "taxon_to", values_to = "weight") |>
+#             mutate(fraction = pct, iteration = iter, sheldon = sheldon_iter)
+#           
+#           all_results <- c(all_results, list(network_long))
+#         }
+#       }
+#       attempts <- attempts + 1
+#     }
+#     
+#     if (attempts >= max_attempts) {
+#       cat("\nWarning: max attempts reached at", pct * 100, "%\n")
+#     }
+#     
+#     cat("\n", iter, "/", n_bootstrap, "successful iterations at", pct * 100, "%\n")
+#   }
+#   
+#   # Combine all results
+#   final_results <- bind_rows(all_results) |>
+#     select(fraction, iteration, taxon_from, taxon_to, weight, sheldon)
+#   
+#   if (!is.null(output_file)) {
+#     dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+#     write.csv(final_results, output_file, row.names = FALSE)
+#     cat("Results saved to", output_file, "\n")
+#   }
+#   
+#   return(final_results)
+# }
+
+run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsample_pcts = c(0.4, 0.5, 0.6, 0.7, 0.8), prevalence_threshold = 0.05, max_attempts = 50, sensitive = TRUE, heterogeneous = FALSE, output_file = NULL) {
   
   n_samples <- ncol(abundance_data)
   all_results <- list()
   
   for (pct in subsample_pcts) {
+    
     cat("Running bootstrap with", pct * 100, "% subsampling\n")
     
     seen_hashes <- new.env(hash = TRUE, parent = emptyenv())
@@ -273,46 +476,89 @@ run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsampl
     
     while (iter < n_bootstrap && attempts < max_attempts) {
       
-      # Sample without replacement
-      subsample_idx <- sample(seq_len(n_samples),
-                              size = floor(n_samples * pct),
-                              replace = FALSE)
-      abundance_sub <- abundance_data[, subsample_idx]
+      subsample_idx <- sample(
+        seq_len(n_samples),
+        size = floor(n_samples * pct),
+        replace = FALSE
+      )
       
-      # Hash to avoid duplicate subsets
+      abundance_sub <- abundance_data[, subsample_idx, drop = FALSE]
+      
+      # avoid duplicate subsets
       subset_hash <- digest::digest(colnames(abundance_sub))
       
       if (!exists(subset_hash, envir = seen_hashes)) {
+        
         assign(subset_hash, TRUE, envir = seen_hashes)
         
-        network <- tryCatch(
-          run_flashweave(abundance_sub, sensitive = sensitive, heterogeneous = heterogeneous),
+        
+        sheldon_vals <- apply(abundance_sub, 2, function(x) {
+          
+          shannon  <- vegan::diversity(x, index = "shannon")
+          richness <- sum(x > 0)
+          
+          if (richness <= 1) return(NA_real_)
+          
+          exp(shannon) / richness
+        })
+        
+        sheldon_iter <- mean(sheldon_vals, na.rm = TRUE)
+        
+        abundance_filtered <- tryCatch(
+          filter_prevalence_matrix(
+            abundance_sub,
+            prevalence_threshold = prevalence_threshold
+          ),
           error = function(e) {
-            cat("\n  Warning: iteration", iter, "failed:", conditionMessage(e), "\n")
+            cat("Filtering failed:", conditionMessage(e), "\n")
+            return(NULL)
+          }
+        )
+        
+        # number of taxa retained
+        n_taxa <- if (!is.null(abundance_filtered))
+          nrow(abundance_filtered) else 0
+        
+        # skip unstable datasets
+        if (is.null(abundance_filtered) || n_taxa < 5) {
+          attempts <- attempts + 1
+          next
+        }
+        
+        network <- tryCatch(
+          run_flashweave(abundance_filtered, sensitive = sensitive, heterogeneous = heterogeneous),
+          error = function(e) {
+            cat("\nWarning: iteration", iter,
+                "failed:", conditionMessage(e), "\n")
             return(NULL)
           }
         )
         
         if (!is.null(network)) {
+          
           iter <- iter + 1
-          cat("\n  Bootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
           
-          sheldon_vals <- apply(abundance_sub, 2, function(x) {
-            shannon  <- vegan::diversity(x, index = "shannon")
-            richness <- sum(x > 0)
-            exp(shannon) / richness
-          })
-          sheldon_iter <- mean(sheldon_vals, na.rm = TRUE)
-          
+          cat("\nBootstrap", iter, "/", n_bootstrap, "completed (", pct * 100, "% subsampling)\n")
+
           network_long <- network |>
             as.data.frame() |>
-            rownames_to_column("taxon_from") |>
-            pivot_longer(-taxon_from, names_to = "taxon_to", values_to = "weight") |>
-            mutate(fraction = pct, iteration = iter, sheldon = sheldon_iter)
+            tibble::rownames_to_column("taxon_from") |>
+            tidyr::pivot_longer(
+              -taxon_from,
+              names_to = "taxon_to",
+              values_to = "weight"
+            ) |>
+            dplyr::mutate(
+              fraction  = pct,
+              iteration = iter,
+              sheldon   = sheldon_iter,
+              n_taxa    = n_taxa
+            )
           
-          all_results <- c(all_results, list(network_long))
+          all_results[[length(all_results) + 1]] <- network_long
         }
       }
+      
       attempts <- attempts + 1
     }
     
@@ -320,12 +566,14 @@ run_flashweave_bootstrap <- function(abundance_data, n_bootstrap = 500, subsampl
       cat("\nWarning: max attempts reached at", pct * 100, "%\n")
     }
     
-    cat("\n", iter, "/", n_bootstrap, "successful iterations at", pct * 100, "%\n")
+    cat(
+      "\n", iter, "/", n_bootstrap,
+      "successful iterations at", pct * 100, "%\n"
+    )
   }
   
-  # Combine all results
-  final_results <- bind_rows(all_results) |>
-    select(fraction, iteration, taxon_from, taxon_to, weight, sheldon)
+  final_results <- dplyr::bind_rows(all_results) |>
+    dplyr::select(fraction, iteration, taxon_from, taxon_to, weight, sheldon, n_taxa)
   
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)

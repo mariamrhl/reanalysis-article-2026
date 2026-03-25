@@ -22,10 +22,71 @@ editor_options:
   chunk_output_type: inline
 ---
 
+```{r}
+#| include: false
+
+library(readr)
+library(biomformat) # BiocManager::install("biomformat")
+library(stringr)
+library(remotes)
+library(phyloseq)
+library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
+library(readxl)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(janitor)
+library(gt)
+library(vegan)
+library(quarto)
+library(ggpubr)
+library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
+library(beemStatic) # remotes::install_github('lch14forever/beem-static')
+library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
+#library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
+library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
+
+tmp <- fs::dir_map("R", source)
+rm(tmp)
+
+theme_set(theme_light())
+
+```
+
+In this file, we will perform network inference on the gut microbiota datasets using three different methods: LIMITS, FlashWeave and BEEM-Static. We will first import the relevant datasets from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. We describe first each tool and its implementation in the following sections, and then we will compare the results obtained from each method in a final section.
+
+> TODO: Modify description
+
+# Importing the MAE object
+
+```{r}
+
+mae_file <- 
+  fs::dir_ls(str_c(data_dir(), "/02-processed-data"), regexp = "MAE_processed_.*\\.rds$") |> 
+  sort(decreasing = TRUE) |>
+  magrittr::extract(1)
+
+
+cat(str_c("Loading MultiAssayExperiment from: 00_data/", mae_file |> str_remove(data_dir()), "\n"))
+
+mae <- readRDS(mae_file)
+
+rm(mae_file)
+
+mae
+
+```
+
+# Network inference with FlashWeave
+
 In this section, we will apply FlashWeave to the different cohorts separately.
 
 ```{r}
 #| include: false
+#| eval: false
 
 library(JuliaCall)
 julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
@@ -55,62 +116,25 @@ tmp <-
 
 ```
 
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
 
 ```{r}
 
 tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
 tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
 
-```
-
-
-```{r}
-# for healthy samples
-
-tmp_filtered_healthy <- 
-  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-# for diseased samples
-
-tmp_filtered_diseased <- 
-  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-
 # for healthy samples
 
 healthy_df <-
-  tmp_filtered_healthy |>
+  tmp_healthy |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
   t()
-
-```
-
-
-```{r}
 
 # for diseased samples
 
 diseased_df <-
-  tmp_filtered_diseased |>
+  tmp_diseased |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
@@ -118,12 +142,13 @@ diseased_df <-
 
 ```
 
-
-For healthy samples, we will run FlashWeave with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
+For both healthy and dysbiotic samples, we will run FlashWeave with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`, and `prevalence_threshold = 0.05`. This is done in the chunk code below.
 
 ```{r}
 
-# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
+# 
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
 
 ```
 
@@ -131,7 +156,8 @@ We save the results in an RDS file for later use.
 
 ```{r}
 
-# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy.rds"))
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBD_20260324.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBD_20260324.rds"))
 
 ```
 
@@ -139,7 +165,8 @@ The results are imported in the chunk code below.
 
 ```{r}
 
-res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy.rds"))
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_IBD_20260324.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_IBD_20260324.rds"))
 
 ```
 
@@ -148,43 +175,7 @@ The results are obtained in the chunk code below.
 ```{r}
 
 df_res_healthy <- get_flashweave_results(res_healthy)
-
-```
-
-For diseased samples, we will run FlashWeave with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
-
-```{r}
-
-# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-
-```
-
-We save the results in an RDS file for later use.
-
-```{r}
-
-# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased.rds"))
-
-```
-
-The results are imported in the chunk code below.
-
-```{r}
-
-res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased.rds"))
-
-```
-
-The results are obtained in the chunk code below.
-
-```{r}
-
 df_res_diseased <- get_flashweave_results(res_diseased)
-
-```
-
-
-```{r}
 
 df_res <-
   bind_rows(
@@ -286,6 +277,7 @@ tmp |>
 
 ```
 
+
 ```{r}
 # filter taxa based on mean relative abundance
 
@@ -304,6 +296,7 @@ tmp_filtered_diseased_top <-
   )
 
 ```
+
 We run the FlashWeave network inference on the top taxa for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
 
 ```{r}
@@ -327,11 +320,11 @@ diseased_df_top <-
 
 ```{r}
 
-# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-
-# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_top.rds"))
-# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_top.rds"))
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+# 
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_top_IBD_20260324.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_top_IBD_20260324.rds"))
 
 ```
 
@@ -339,8 +332,8 @@ We load the results in the chunk code below.
 
 ```{r}
 
-res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_top.rds"))
-res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_top.rds"))
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_top_IBD_20260324.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_top_IBD_20260324.rds"))
 
 ```
 
@@ -452,7 +445,6 @@ tmp <-
 
 ```
 
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
 
 ```{r}
 
@@ -472,10 +464,6 @@ tmp_filtered_healthy <-
     by = join_by(uid)
   )
 
-```
-
-
-```{r}
 # for diseased samples
 
 tmp_filtered_diseased <- 
@@ -499,11 +487,6 @@ healthy_df <-
   column_to_rownames("uid") |>
   t()
 
-```
-
-
-```{r}
-
 # for diseased samples
 
 diseased_df <-
@@ -518,12 +501,12 @@ diseased_df <-
 We run the FlashWeave network inference for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, and `max_attempts = 120`. This is done in the chunk code below.
 
 ```{r}
-# 
+
 # res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.8, 0.9), max_attempts = 120)
 # res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.7, 0.8), max_attempts = 120)
-# 
-# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBS.rds"))
-# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBS.rds"))
+
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBS_20260324.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBS_20260324.rds"))
 
 ```
 
@@ -554,8 +537,6 @@ tmp <-
 
 ```
 
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
-
 ```{r}
 
 tmp_healthy <- tmp |> filter(subject_disease_status == "CTR")
@@ -563,31 +544,8 @@ tmp_diseased <- tmp |> filter(subject_disease_status == "CDI")
 
 # for healthy samples
 
-tmp_filtered_healthy <- 
-  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
-    by = join_by(uid)
-  )
-
-# for diseased samples
-
-tmp_filtered_diseased <- 
-  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["CDI"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, status, subject_disease_status),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-
-# for healthy samples
-
 healthy_df <-
-  tmp_filtered_healthy |>
+  tmp_healthy |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
@@ -596,7 +554,7 @@ healthy_df <-
 # for diseased samples
 
 diseased_df <-
-  tmp_filtered_diseased |>
+  tmp_diseased |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
@@ -608,11 +566,11 @@ We run the FlashWeave network inference for healthy and diseased samples separat
 
 ```{r}
 
-# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
 # 
-# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CDI.rds"))
-# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CDI.rds"))
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CDI_20260324.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CDI_20260324.rds"))
 
 ```
 
@@ -620,8 +578,8 @@ We load the results in the chunk code below.
 
 ```{r}
 
-res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI.rds"))
-res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI.rds"))
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI_20260324.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI_20260324.rds"))
 
 ```
 
@@ -724,8 +682,7 @@ tmp |>
   aes(x = mean_rel_ab |> log10()) +
   geom_histogram(bins = 30) +
   geom_vline(xintercept = -3, linetype = "dashed", color = "red") +
-  labs(x = "log10 mean relative abundance", y = "count",
-       caption = "The vertical dashed red line indicates the selected threshold for mean relative abundance (0.00001)")
+  labs(x = "log10 mean relative abundance", y = "count", caption = "The vertical dashed red line indicates the selected threshold for mean relative abundance (0.00001)")
 
 ```
 
@@ -772,19 +729,19 @@ diseased_df_top <-
 
 ```{r}
 
-# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
 # 
-# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top.rds"))
-# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top.rds"))
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top_20260324.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top_20260324.rds"))
 
 ```
 
 
 ```{r}
 
-res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top.rds"))
-res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top.rds"))
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CDI_top_20260324.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CDI_top_20260324.rds"))
 
 df_res_healthy_top <- get_flashweave_results(res_healthy_top)
 df_res_diseased_top <- get_flashweave_results(res_diseased_top)
@@ -891,8 +848,6 @@ tmp <-
 
 ```
 
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
-
 ```{r}
 
 tmp_healthy <- tmp |> filter(cohort == "H")
@@ -900,31 +855,8 @@ tmp_diseased <- tmp |> filter(cohort == "CRC")
 
 # for healthy samples
 
-tmp_filtered_healthy <- 
-  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
-    by = join_by(uid)
-  )
-
-# for diseased samples
-
-tmp_filtered_diseased <- 
-  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["CRC"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, cohort),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-
-# for healthy samples
-
 healthy_df <-
-  tmp_filtered_healthy |>
+  tmp_healthy |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
@@ -933,7 +865,7 @@ healthy_df <-
 # for diseased samples
 
 diseased_df <-
-  tmp_filtered_diseased |>
+  tmp_diseased |>
   select(uid, taxon, rel_ab) |>
   pivot_wider(names_from = taxon, values_from = rel_ab) |>
   column_to_rownames("uid") |>
@@ -945,11 +877,11 @@ We run the FlashWeave network inference for healthy and diseased samples separat
 
 ```{r}
 
-# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_healthy <- run_flashweave_bootstrap(healthy_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
+# res_diseased <- run_flashweave_bootstrap(diseased_df, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0.05)
 # 
-# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CRC.rds"))
-# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CRC.rds"))
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_20260324.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_20260324.rds"))
 
 ```
 
@@ -957,8 +889,8 @@ We load the results in the chunk code below.
 
 ```{r}
 
-res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC.rds"))
-res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC.rds"))
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_20260324.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_20260324.rds"))
 
 ```
 
@@ -1100,19 +1032,18 @@ diseased_df_top <-
 
 ```{r}
 
-# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
-# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120)
+# res_healthy_top <- run_flashweave_bootstrap(healthy_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+# res_diseased_top <- run_flashweave_bootstrap(diseased_df_top, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
 # 
-# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top.rds"))
-# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top.rds"))
+# saveRDS(res_healthy_top, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top_20260324.rds"))
+# saveRDS(res_diseased_top, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top_20260324.rds"))
 
 ```
 
-
 ```{r}
 
-res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top.rds"))
-res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top.rds"))
+res_healthy_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_top_20260324.rds"))
+res_diseased_top <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_top_20260324.rds"))
 
 ```
 

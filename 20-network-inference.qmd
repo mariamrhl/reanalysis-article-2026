@@ -39,11 +39,12 @@ library(tidyr)
 library(janitor)
 library(gt)
 library(vegan)
+library(quarto)
 library(ggpubr)
 library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
 library(beemStatic) # remotes::install_github('lch14forever/beem-static')
 library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
-library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
+#library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
 library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
 
 tmp <- fs::dir_map("R", source)
@@ -80,7 +81,7 @@ mae
 # Network inference with LIMITS
 
 ```{r 20-network-inference, child = '21-LIMITS.qmd'}
-#| eval: true
+#| eval: false
 ```
 
 # Network inference with FlashWeave
@@ -92,5 +93,5 @@ mae
 # Network inference with BEEM-Static
 
 ```{r 20-network-inference, child = '23-BEEM_Static.qmd'}
-#| eval: true
+#| eval: false
 ```
