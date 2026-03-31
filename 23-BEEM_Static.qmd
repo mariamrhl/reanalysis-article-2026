@@ -46,46 +46,11 @@ tmp <-
 
 ```
 
-### Prevalence filtering
-
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 20% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
-
-::: {.callout-note}
-The choice of a prevalence threshold of 20% is somewhat arbitrary, but it is necessary in this case since BEEM-Static does not handle datasets with lots of zeros well.
-:::
 
 ```{r}
 
 tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
 tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
-
-```
-
-
-```{r}
-# for healthy samples
-
-tmp_filtered_healthy <- 
-  filter_prevalence(tmp_healthy, prevalence_threshold = 0.2) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "uid") |> 
-      select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-# for diseased samples
-
-tmp_filtered_diseased <- 
-  filter_prevalence(tmp_diseased, prevalence_threshold = 0.2) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "uid") |> 
-      select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
 
 ```
 

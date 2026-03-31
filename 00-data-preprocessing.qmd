@@ -22,6 +22,7 @@ editor: source
 
 ```{r}
 #| include: false
+#| label: setup
 
 library(readr)
 library(biomformat) # BiocManager::install("biomformat")

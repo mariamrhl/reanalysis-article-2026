@@ -46,10 +46,6 @@ tmp <-
 
 ```
 
-### Prevalence filtering
-
-We will then filter out low-abundance taxa, by keeping only taxa that are present in at least 5% of the samples, and the remaining is grouped in a category named "Other". This is done in the chunk code below.
-
 ```{r}
 
 tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
@@ -57,61 +53,6 @@ tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
 
 ```
 
-
-```{r}
-# for healthy samples
-
-tmp_filtered_healthy <- 
-  filter_prevalence(tmp_healthy, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "uid") |> 
-      select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
-
-```
-
-
-```{r}
-# for diseased samples
-
-tmp_filtered_diseased <- 
-  filter_prevalence(tmp_diseased, prevalence_threshold = 0.05) |>
-  left_join(
-    mae[["IBD"]] |> colData() |> as.data.frame() |> as_tibble(rownames = "uid") |> 
-      select(uid, pid, visit_num, diagnosis),
-    by = join_by(uid)
-  )
-
-```
-
-### Network inference with LIMITS (test run)
-
-```{r}
-
-# for healthy samples
-
-healthy_df <-
-  tmp_filtered_healthy |>
-  select(uid, taxon, rel_ab) |>
-  pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("uid") |>
-  t()
-
-```
-
-```{r}
-
-# for diseased samples
-
-diseased_df <-
-  tmp_filtered_diseased |>
-  select(uid, taxon, rel_ab) |>
-  pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("uid") |>
-  t()
-
-```
 
 ```{r}
 

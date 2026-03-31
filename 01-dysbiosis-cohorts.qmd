@@ -44,7 +44,7 @@ For the analyses, we have the following datasets at our disposal:
 
 From Metagenomics (MGX) and products sections, we have the following file available:
 
-- `taxonomic_profiles.biom.gz`: contains the taxonomic profiles and relative abundance data for **stool samples**, in BIOM format.
+- `taxonomic_profiles.biom.gz`: contains the taxonomic profiles and **relative abundance metagenomics data** for **stool samples**, in BIOM format.
 
 In the chunks below, we import the metadata and taxonomic profile for the IBD dataset.
 
@@ -58,6 +58,17 @@ metadata <- read_csv(file.path(data_dir(), "01-raw-data/01-IBD", "hmp2_metadata_
 data <- read_biom(file.path(data_dir(), "01-raw-data/01-IBD", "taxonomic_profiles.biom"))
 
 ```
+
+We document the number of samples and feature in the original dataset.
+
+```{r}
+
+n_samples <- nrow(metadata)
+n_features <- ncol(data)
+
+```
+
+There are `r n_samples` samples and `r n_features` features in the original dataset.
 
 For abundance data, we need to filter the taxonomic profiles to keep only the bacterial species relevant for our analyses, and to remove the taxonomic levels from the taxonomic names by keeping only the last available level.
 
@@ -166,8 +177,6 @@ abundance <-
   column_to_rownames("taxon") |>
   t() |>
   as.data.frame()
-
-abundance |> head() |> select(1:5)
 
 ```
 
@@ -303,6 +312,7 @@ abundance |>
   plot_layout(nrow = 2)
 
 ```
+Below, we check if there are any samples with a taxon with relative abundance of 1, and if so, we document them by showing the sample ID and the taxonomic annotation of the taxon with relative abundance of 1.
 
 ```{r}
 
@@ -332,10 +342,11 @@ samples <- metadata |> clean_names() |> filter(data_type == "metagenomics") |> s
 ```
 
 
-```{r}
-#| fig-height: 8
-#| fig-width: 8
+::: panel-tabset
 
+### Age at diagnosis
+```{r}
+#| results: asis
 samples |>
   filter(!is.na(age_at_diagnosis)) |>
   ggplot() +
@@ -345,39 +356,49 @@ samples |>
   scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
   scale_color_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
   labs(x = "", y = "Age", fill = "Diagnosis", color = "Diagnosis",
-       subtitle = "Distribution of age across diagnosis groups") +
-  
-  samples |>
+       subtitle = "Distribution of age across diagnosis groups")
+```
+
+### Education level
+```{r}
+#| results: asis
+samples |>
   ggplot() +
   aes(x = education_level, fill = diagnosis) +
   geom_bar(position = "stack") +
   scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
   labs(y = "", x = "Education level", fill = "Diagnosis",
        subtitle = "Distribution of education level \nacross diagnosis groups") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  
-  samples |>
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+### Occupation
+```{r}
+#| results: asis
+samples |>
   ggplot() +
   aes(x = occupation, fill = diagnosis) +
   geom_bar(position = "stack") +
   scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
   labs(y = "", x = "Occupation", fill = "Diagnosis",
        subtitle = "Distribution of occupation across diagnosis groups") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  
-  samples |>
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+### Diagnosis
+```{r}
+#| results: asis
+samples |>
   ggplot() +
   aes(x = diagnosis, fill = diagnosis) +
   geom_bar(position = "stack") +
   scale_fill_manual(values = c("nonIBD" = "#0078B9", "CD" = "#EA0017", "UC" = "#FF7F0E")) +
   labs(y = "", x = "", fill = "Diagnosis",
-       subtitle = "Distribution of diagnosis groups") +
-  
-  plot_layout(nrow = 2)
-  
-  
+       subtitle = "Distribution of diagnosis groups")
 
 ```
+:::
 
 ::: {.callout-note}
 There is no age data for the healthy group, since healthy participants were not diagnosed with IBD, so they do not have an age at diagnosis.
@@ -641,6 +662,8 @@ samples <-
   dplyr::rename(uid = sample_id, pid = participant_id) |>
   column_to_rownames("uid")
 
+samples |> glimpse()
+
 ```
 
 
@@ -677,7 +700,18 @@ metadata <- readxl::read_excel(file.path(data_dir(), "01-raw-data/02-IBS", "meta
 
 ```
 
-We will transform the abundance data into a `phyloseq` object in the next steps, but before that, we need to perform some data cleaning. For this, we need to filter the abundance data to keep only bacterial species, and to remove the taxonomic levels from the taxonomic names by keeping only the last available level.
+We first document the number of samples and features in the original dataset.
+
+```{r}
+
+n_samples <- nrow(metadata)
+n_features <- ncol(data_biopsy) - 1 # we remove the first column
+
+```
+
+There are `r n_samples` samples and `r n_features` features in the original dataset.
+
+We then transform the abundance data into a `phyloseq` object in the next steps, but before that, we need to perform some data cleaning. For this, we need to filter the abundance data to keep only bacterial species, and to remove the taxonomic levels from the taxonomic names by keeping only the last available level.
 
 ```{r}
 
@@ -842,9 +876,11 @@ samples <- metadata |> clean_names()
 
 ```
 
+::: panel-tabset
 
+### Age
 ```{r}
-
+#| results: asis
 samples |>
   ggplot() +
   aes(x = cohort, y = age, color = cohort, fill = cohort) +
@@ -862,8 +898,12 @@ samples |>
        subtitle = "Distribution of age across cohorts") +
   theme(
     axis.text.x = element_blank()
-  ) +
-  
+  )
+```
+
+### BMI
+```{r}
+#| results: asis
 samples |>
   ggplot() +
   aes(x = cohort, y = bmi, color = cohort, fill = cohort) +
@@ -881,9 +921,13 @@ samples |>
        subtitle = "Distribution of BMI across cohorts") +
   theme(
     axis.text.x = element_blank()
-  ) +
-  
-  samples |>
+  )
+```
+
+### Gender
+```{r}
+#| results: asis
+samples |>
   ggplot() +
   aes(x = gender, fill = cohort) +
   geom_bar(position = "dodge") +
@@ -892,9 +936,13 @@ samples |>
     labels = c("H" = "Healthy", "C" = "IBS-C", "D" = "IBS-D")
     ) +
   labs(x = "", y = "Count", color = "Cohort", fill = "Cohort",
-       subtitle = "Distribution of gender across cohorts") +
-  
-  samples |>
+       subtitle = "Distribution of gender across cohorts")
+```
+
+### Cohort
+```{r}
+#| results: asis
+samples |>
   ggplot() +
   aes(x = cohort, fill = cohort) +
   geom_bar(position = "dodge") +
@@ -906,12 +954,9 @@ samples |>
        subtitle = "Distribution of samples across cohorts") +
    theme(
     axis.text.x = element_blank()
-  ) +
-  
-  plot_layout(nrow = 2)
-
+  )
 ```
-
+:::
 
 ```{r}
 
@@ -1123,7 +1168,7 @@ Some samples were discarded during rarefaction, so we need to filter the samples
 
 ```{r}
 
-samples <- samples |> filter(rownames(samples) %in% rownames(abundance))
+samples <- samples |> filter(rownames(samples) %in% colnames(abundance))
 
 samples |> glimpse()
 
@@ -1162,7 +1207,7 @@ The samples were classified into nine groups according to colonoscopic and histo
 
 We have the following datasets at our disposal:
 
-- `41591_2019_458_MOESM3_ESM.xlsx`: contains the processed datasets for stool samples, in Excel format. This correspond to the file "Supplementary data 3.xlsx" in the article (version 1 from 2019-11-28).
+- `41591_2019_458_MOESM3_ESM.xlsx`: contains the processed datasets for **stool samples**, in Excel format, which contains participants metadata and **metagenomics relative abundance data**. This correspond to the file "Supplementary data 3.xlsx" in the article (version 1 from 2019-11-28).
 
 We import those datasets in the chunks below.
 
@@ -1173,6 +1218,17 @@ data <- read_xlsx(file.path(data_dir(), "01-raw-data/03-CRC", "41591_2019_458_MO
 metadata <- read_xlsx(file.path(data_dir(), "01-raw-data/03-CRC", "41591_2019_458_MOESM3_ESM.xlsx"), skip = 2, sheet = 4)
 
 ```
+
+We first document the number of samples and features in the original dataset.
+
+```{r}
+
+n_samples <- nrow(metadata)
+n_features <- ncol(data) - 1 # we remove the first column
+
+```
+
+There are `r n_samples` samples and `r n_features` features in the original dataset.
 
 As in the previous datasets, we need to perform some data cleaning before creating the `phyloseq` object. For abundance data, we need to filter the dataset to keep only bacterial species.
 
@@ -1191,8 +1247,9 @@ Now, we see that we have `r nrow(metadata)`samples in metadata, and `r ncol(abun
 setdiff(metadata$Subject_ID, colnames(abundance))
 
 ```
-
+::: {.callout-note}
 After checking manually, we see that this sample is present in the metadata, but not in the abundance data, so we can simply filter it out from the metadata.
+:::
 
 ```{r}
 
@@ -1235,12 +1292,9 @@ taxonomy <-
 We check if there are duplicates in taxa species, and document them below.
 
 ```{r}
-
-taxonomy |> 
-  group_by(taxon_name) |> 
-  summarise(n = n()) |> 
-  filter(n > 1) |>
-  gt(caption = "Taxonomic annotation with duplicates")
+  
+cat("There are", nrow(taxonomy |> group_by(taxon_name) |> summarise(n = n()) |> filter(n > 1)), 
+    "duplicated taxonomic annotations.\n")
 
 ```
 
@@ -1264,10 +1318,98 @@ abundance <- abundance |> filter(rownames(abundance) %in% rownames(taxonomy))
 
 ```
 
-For sample (metadata) data, we only keep relevant metadata variables for our analyses, and we set the sample IDs as row names. The selected variables are:
+For sample (metadata) data, we only keep relevant metadata variables for our analyses, and we set the sample IDs as row names. 
 
-- `Subject_ID`: the sample ID, which will be set as row names.
-- `Group`: the health status of the samples.
+We first document the original metadata variables, and then we select the relevant ones for our analyses.
+
+```{r}
+
+samples <- metadata |> clean_names()
+
+```
+
+::: panel-tabset
+### Age
+```{r}
+#| results: asis
+samples |>
+  mutate(cohort = case_when(
+    group == "Healthy" ~ "H",
+    group %in% c("MP", "Stage_0", "Stage_I_II", "Stage_III_IV") ~ "CRC",
+    group == "HS" ~ "H"
+  )) |>
+  ggplot() +
+  aes(x = cohort, y = age, color = cohort, fill = cohort) +
+  geom_violin(alpha = 0.6, color = NA) +
+  geom_point(position = position_jitter(width = 0.2), size = 2, alpha = 0.8) +
+  labs(x = "", y = "Age", color = "Group", fill = "Group",
+       subtitle = "Distribution of age across groups") +
+  theme(
+    axis.text.x = element_blank()
+  )
+```
+
+### BMI
+```{r}
+#| results: asis
+samples |>
+  mutate(cohort = case_when(
+    group == "Healthy" ~ "H",
+    group %in% c("MP", "Stage_0", "Stage_I_II", "Stage_III_IV") ~ "CRC",
+    group == "HS" ~ "H"
+  )) |>
+  mutate(
+    bmi = case_when(
+      bmi == "NA" ~ NA_real_,
+      TRUE ~ as.numeric(bmi)
+    )
+  ) |>
+  ggplot() +
+  aes(x = cohort, y = bmi, color = cohort, fill = cohort) +
+  geom_violin(alpha = 0.6, color = NA) +
+  geom_point(position = position_jitter(width = 0.2), size = 2, alpha = 0.8) +
+  labs(x = "", y = "BMI", color = "Group", fill = "Group",
+       subtitle = "Distribution of BMI across groups") +
+  theme(
+    axis.text.x = element_blank()
+  )
+```
+
+### Gender
+```{r}
+#| results: asis
+samples |>
+   mutate(cohort = case_when(
+    group == "Healthy" ~ "H",
+    group %in% c("MP", "Stage_0", "Stage_I_II", "Stage_III_IV") ~ "CRC",
+    group == "HS" ~ "H"
+  )) |>
+  ggplot() +
+  aes(x = gender, fill = cohort) +
+  geom_bar(position = "dodge") +
+  labs(x = "", y = "Count",fill = "Group",
+       subtitle = "Distribution of gender across groups")
+```
+
+### Group
+```{r}
+#| results: asis
+  samples |>
+   mutate(cohort = case_when(
+    group == "Healthy" ~ "H",
+    group %in% c("MP", "Stage_0", "Stage_I_II", "Stage_III_IV") ~ "CRC",
+    group == "HS" ~ "H"
+  )) |>
+  ggplot() +
+  aes(x = cohort, fill = cohort) +
+  geom_bar(position = "dodge") +
+  labs(x = "", y = "Count", fill = "Group",
+       subtitle = "Distribution of samples across groups") +
+  theme(
+    axis.text.x = element_blank()
+  )
+```
+:::
 
 We document the different levels of the variable `Group` below.
 
@@ -1282,7 +1424,15 @@ metadata |>
 
 ```
 
-We filter the metadata to keep only the selected variables, and set the sample IDs as row names.
+
+The selected variables are:
+
+- `Subject_ID`: the sample ID, which will be set as row names.
+- `Group`: the health status of the samples.
+
+We filter the metadata to keep only the selected variables, set the sample IDs as row names, and document all the variables in a dictionary, documenting the original variable name, the new variable name, the description of the variable, the values it can take, and if it is kept for further analyses or not.
+
+> TODO: add dictionnary
 
 ```{r}
 
@@ -1307,21 +1457,6 @@ We filter samples for which we do not have a clear health status (i.e., samples 
 samples <- samples |> filter(!is.na(cohort)) 
 
 samples |> glimpse()
-
-```
-
-
-```{r}
-
-samples |> 
-  rownames_to_column("sample_id") |>
-  group_by(cohort) |>
-  summarise(n_samples = n()) |>
-  ggplot() +
-  aes(x = cohort, y = n_samples, fill = cohort) +
-  geom_bar(stat = "identity") +
-  labs(x = "Cohort", y = "Number of samples", fill = "Cohort",
-       subtitle = "Number of samples per cohort")
 
 ```
 
@@ -1356,6 +1491,38 @@ abundance |>
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
+
+```
+
+```{r}
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  group_by(sample_id) |>
+  mutate(rel_ab = count / sum(count)) |>
+  ungroup() |>
+  filter(rel_ab > 0) |>
+  group_by(sample_id) |>
+  summarise(n_taxa = n()) |>
+  ggplot() +
+  aes(x = n_taxa) +
+  geom_histogram(bins = 30) +
+  labs(x = "Number of taxa", y = "Number of samples",
+       subtitle = "Distribution of the number of taxa per sample") +
+
+abundance |> 
+  rownames_to_column("sample_id") |>
+  pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+  group_by(sample_id) |>
+  summarise(mean_count = mean(count)) |>
+  ggplot() +
+  aes(x = mean_count |> log10()) +
+  geom_histogram(bins = 30) +
+  labs(x = "Mean counts", y = "Number of samples",
+       subtitle = "Distribution of the mean counts across samples") +
+
+  plot_layout(nrow = 2)
 
 ```
 
@@ -1399,6 +1566,27 @@ taxonomy <- read_csv(file.path(data_dir(), "01-raw-data/04-CDI", "motus_taxonomy
 ::: {.callout-note}
 Interestingly, this dataset contains samples from different study (and thus different sequencing protocols).
 :::
+
+We document below the number of samples in each of the different studies included in the dataset.
+
+```{r}
+
+metadata |>
+  janitor::clean_names() |>
+  group_by(study) |>
+  summarise(n = n()) |>
+  gt(caption = "Number of samples per study")
+
+```
+
+
+Below, we document the study protocol for each of the studies included in the dataset, by looking at the original articles associated with each of the studies.
+
+* [Kim et al., 2020 (Nature scientific reports)](https://www.nature.com/articles/s41598-020-74090-0): through July 2016 to June 2018, individuals diagnosed with CDI at Hanyang University Seoul Hospital were screened, and CDI patients who could provide over 50 g of faeces sample from CDI diagnosed stool sample were enrolled in the study.
+
+* [Kumar et al., 2017 (Nature njp biofilms and microbiome)](https://www.nature.com/articles/s41522-017-0020-7): to complete
+
+> TODO: complete this section
 
 ::: {.callout-note}
 We see here that we do not have the complete taxonomy lineage for the features in the abundance data, but only the last available taxonomic level (e.g., species). This will make it difficult to filter the dataset to keep only bacterial species, since we do not have the taxonomic annotation for the kingdom level. *Can we assume that all species are bacteria and go ahead with the analyses?*
@@ -1459,6 +1647,75 @@ taxonomy <-
 taxonomy |> glimpse()
 
 ```
+
+We document the metadata variables to select the relevant ones for our analyses.
+
+::: panel-tabset
+
+### Age group
+```{r}
+#| results: asis
+metadata |>
+  clean_names() |>
+  ggplot() +
+  aes(x = age_group) +
+  geom_bar() +
+  labs(x = "Age group", y = "Count", fill = "Age group",
+       subtitle = "Distribution of samples across age groups",
+       caption = "Only several studies have age group information, thus is not representative of the whole dataset.")
+```
+
+### Geography
+```{r}
+#| results: asis
+metadata |>
+  clean_names() |>
+  ggplot() +
+  aes(x = geography) +
+  geom_bar() +
+  labs(x = "Geography", y = "Count", fill = "Geography", 
+       subtitle = "Distribution of samples across geographies")
+```
+
+### Antibiotics
+```{r}
+#| results: asis
+metadata |>
+  clean_names() |>
+  ggplot() +
+  aes(x = abx) +
+  geom_bar() +
+  labs(x = "Antibiotics", y = "Count", fill = "Antibiotics",
+       subtitle = "Distribution of samples across antibiotics usage")
+```
+
+### CDI diagnosis
+```{r}
+#| results: asis
+metadata |>
+  clean_names() |>
+  ggplot() +
+  aes(x = cdi) +
+  geom_bar() +
+  labs(x = "CDI diagnosis", y = "Count", fill = "CDI diagnosis",
+       subtitle = "Distribution of samples across CDI diagnosis")
+
+```
+
+### C.difficile presence
+```{r}
+#| results: asis
+metadata |>
+  clean_names() |>
+  ggplot() +
+  aes(x = cdiff, fill = cdi) +
+  geom_bar() +
+  labs(x = "C.Difficile presence", y = "Count", fill = "CDI diagnosed",
+       subtitle = "Distribution of samples across C. difficile presence")
+```
+:::
+
+> Create a dictionary to document original variable names, new variable names, description of the variables, values they can take, and if they are kept for further analyses or not.
 
 We will now filter the metadata to keep only relevant variables for our analyses, and to set the sample IDs as row names. The selected variables are: 
 
