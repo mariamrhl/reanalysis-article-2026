@@ -299,60 +299,7 @@ patchwork::plot_layout(nrow = 1) + patchwork::plot_annotation(title = "FlashWeav
 
 ```
 
-Surprisingly, there is a significant difference in net interactions between healthy and diseased samples, with **healthy samples having more positive net interactions compared to diseased samples**. This is not consistent with the PEP results, which did not show a significant difference between the two groups. Edge number may be a confounding factor here. We will check the correlation between edge number and net interactions in the plot below.
-
-```{r}
-#| fig-height: 6
-#| fig-width: 12
-
-
-df_res |>
-  ggplot() +
-  aes(x = edge_num, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = edge_num, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = edge_num, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.015,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Edge number", y = "Net interactions (rho)", color = "Group", fill = "Group", 
-       subtitle = "Correlation between edge number and net interactions \nin healthy and diseased samples") +
-  
-  df_res |>
-  ggplot() +
-  aes(x = edge_num, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = edge_num, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = edge_num, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.015,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Edge number", y = "Proportion of positive edges (PEP)", color = "Group", fill = "Group", 
-      subtitle = "Correlation between edge number and PEP \nin healthy and diseased samples") +
-  
-patchwork::plot_layout(nrow = 1) + patchwork::plot_annotation(title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", caption = "Correlation is computed with Pearson's correlation test")
-
-```
-
-Based on this plot, we can see a **significant positive correlation between edge number and net interactions**, meaning that samples with a higher number of edges tend to have more positive net interactions. This suggests that edge number may be a confounding factor in the observed difference in net interactions between healthy and diseased samples. However, there is no significant correlation between edge number and PEP, meaning that while the net interaction metric is confounded by edge number, which is a technical artifact (to check), the PEP metric is not confounded by edge number and may be a more robust metric to compare between groups.
+Surprisingly, there is a significant difference in net interactions between healthy and diseased samples, with **diseased samples having more positive net interactions compared to healthy samples**. This is not consistent with the PEP results, which did not show a significant difference between the two groups.
 
 We will check correlation between net interaction and Sheldon evenness in the plot below.
 
@@ -938,6 +885,33 @@ In the plots above, we observe that there is a significant difference in PEP bet
 ::: {.callout-note}
 Upon checking the metadata, we find that this dataset is actually a concatenation of different studies, and in those are included recurrent CDI patients for which antibiotic treatments/FMT may have increased the evenness of the microbiota (to check). In the original ELife paper from Ferretti et al. (2023), the authors showed a difference in evenness with age, but this remains to be checked. We also observe a significant difference in Shannon diversity and richness between healthy and diseased samples, with diseased samples having a lower Shannon diversity and richness compared to healthy samples.
 :::
+
+```{r}
+# we rank total relative abundances for each taxa and check the most abundant ones
+
+tmp_healthy |>
+  group_by(taxon) |>
+  summarise(total_rel_ab = sum(rel_ab)) |>
+  mutate(proportion = total_rel_ab / sum(total_rel_ab)) |>
+  arrange(desc(proportion)) |>
+  select(taxon, proportion) |>
+  slice_head(n = 5) |>
+  gt(caption = "Top 5 most abundant taxa in healthy CDI samples (proportion of total relative abundance)") |>
+  fmt_percent(columns = "proportion", decimals = 2)
+
+tmp_diseased |>
+  group_by(taxon) |>
+  summarise(total_rel_ab = sum(rel_ab)) |>
+  mutate(proportion = total_rel_ab / sum(total_rel_ab)) |>
+  arrange(desc(proportion)) |>
+  select(taxon, proportion) |>
+  slice_head(n = 5) |>
+  gt(caption = "Top 5 most abundant taxa in diseased CDI samples (proportion of total relative abundance)") |>
+  fmt_percent(columns = "proportion", decimals = 2)
+
+
+```
+
 
 We will now check if there is any correlation between Sheldon evenness and PEP in the plot below.
 
