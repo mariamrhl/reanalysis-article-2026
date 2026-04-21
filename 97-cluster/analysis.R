@@ -6,6 +6,7 @@ library(SummarizedExperiment)
 library(MultiAssayExperiment)
 library(beemStatic) # remotes::install_github('lch14forever/beem-static')
 library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
+library(phyloseq)
 
 
 ## Load the data
@@ -159,8 +160,8 @@ rm(CDI_long, CDI_healthy_long, CDI_diseased_long)
 ### IBD datasets
 # n_bagging = 200 as per the article's implementation
 
-limits_IBD_healthy <- run_network_bootstrap(IBD_healthy, run_fn = run_limits, n_bootstrap = 100, prevalence_threshold = 0, max_attempts = 100, bagging.iter = 200)
-limits_IBD_diseased <- run_network_bootstrap(IBD_diseased, run_fn = run_limits, n_bootstrap = 100, prevalence_threshold = 0, max_attempts = 100, bagging.iter = 200)
+limits_IBD_healthy <- run_network_bootstrap(IBD_healthy, run_fn = run_limits, n_bootstrap = 100, prevalence_threshold = 1, max_attempts = 100, bagging.iter = 200)
+limits_IBD_diseased <- run_network_bootstrap(IBD_diseased, run_fn = run_limits, n_bootstrap = 100, prevalence_threshold = 1, max_attempts = 100, bagging.iter = 200)
 
 ## Run BEEM-static
 

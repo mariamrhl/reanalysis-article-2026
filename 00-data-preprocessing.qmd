@@ -36,6 +36,7 @@ library(patchwork)
 library(ggplot2)
 library(dplyr)
 library(tidyverse)
+library(magrittr)
 library(tidyr)
 library(janitor)
 library(gt)
@@ -46,6 +47,7 @@ library(beemStatic) # remotes::install_github('lch14forever/beem-static')
 library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
 library(tidySummarizedExperiment) # BiocManager::install("tidySummarizedExperiment")
 library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
+library(curatedMetagenomicData) # BiocManager::install("curatedMetagenomicData")
 
 tmp <- fs::dir_map("R", source)
 rm(tmp)
@@ -54,53 +56,1321 @@ theme_set(theme_light())
 
 ```
 
-In this first section, the relevant datasets are imported from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI) as well as the healthy cohorts from the Human Microbiome Project (HMPv13 and HMPv35), NIBIOHN and MORINAGA cohorts, and a "diet intervention" cohort as well. The datasets are available at these following links:
-
-* For **dysbiotic cohorts** (in `01-dysbiotic-cohorts.qmd`):
+In this section, the relevant datasets are imported from the dysbiotic cohorts (that is, those pertaining to IBD, IBS, CRC, and CDI). The datasets are available at these following links:
 
   - IBD cohort: [https://ibdmdb.org/results](https://ibdmdb.org/results)
   - IBS cohort: [https://data.mendeley.com/datasets/29n2z5r5ph/3](https://data.mendeley.com/datasets/29n2z5r5ph/3)
   - CRC cohort: [https://www.nature.com/articles/s41591-019-0458-7](https://www.nature.com/articles/s41591-019-0458-7)
   - CDI cohort: [https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI](https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI)
   
-* For **healthy cohorts** (in `02-healthy-cohorts.qmd`):
 
-  - HMPv13 and HMPv35: [https://github.com/twbattaglia/MicrobeDS/tree/master/data](https://github.com/twbattaglia/MicrobeDS/tree/master/data)
-  - NIBIOHN and MORINAGA cohorts: [https://link.springer.com/article/10.1186/s12866-021-02215-0](https://link.springer.com/article/10.1186/s12866-021-02215-0)
-  - Diet intervention cohort: [https://pubmed.ncbi.nlm.nih.gov/36079725/](https://pubmed.ncbi.nlm.nih.gov/36079725/)
-  
-Supplementary cohorts will also be used in the analyses, and they will be imported in the third section (see `03-supplementary-cohorts.qmd`):
+The final output will be a MAE (MultiAssayExperiment) object, containing data that has been cleaned for the downstream analyses.
 
-- IBD cohort without time series (Fransoza et al. 2019): [https://www.nature.com/articles/s41564-018-0306-4](https://www.nature.com/articles/s41564-018-0306-4)
-- IBD cohort with time series (Halfvarson et al., 2017): [https://www.nature.com/articles/nmicrobiol20174](https://www.nature.com/articles/nmicrobiol20174)
+The analyses will include: data cleaning, taxonomic aggregation (if necessary) and rarefaction. 
 
-The final output will be a MAE (MultiAssayExperiment) object, containing data that has been cleaned and rarefied for the downstream analyses.
+We will transform each dataset into a `phyloseq` object, before merging them into a `MultiAssayExperiment` object in the last section. For this we need:
 
-# Dysbiotic cohorts
+- abundance data, a matrix of relative abundance with samples as rows and features (taxa) as columns.
+- taxonomy data, a data frame with features (taxa) as rows and taxonomic levels as columns.
+- samples data, a data frame with samples as rows and metadata variables as columns.
 
-```{r 00-data-preprocessing, child = '01-dysbiosis-cohorts.qmd'}
-#| eval: true
+
+# Processing of the main diseased cohorts datasets
+
+## IBD dataset (Lloyd-Price et al. 2019)
+
+The inflammatory bowel disease (IBD) dataset was obtained from the [IBDMDB](https://ibdmdb.org/), with the results published in Lloyd-Price et al. (2019). The authors of the Science paper did not provide information to which study name the IBD dataset comes from, so the HMP2 study was chosen, which seems like a reasonable choice since it is the most recent study on this page. 
+
+Stool samples were initially collected from 132 participants at multiple time points. Specifically, samples were collected at baseline (that is after the initial colonoscopy, which was used to stratify participants into healthy controls, Crohn's disease (CD) patients, and ulcerative colitis (UC) patients), and then every 2 weeks for 1 years.
+
+Metagenomics (MGX) were performed on 1638 stool samples; DNA was quantified, normalized, and used to prepare sequencing libraries with the Nextera XT kit. Libraries were pooled, quality-checked, and sequenced on an Illumina HiSeq platform to generate ~10 million paired-end reads per sample. Raw sequencing data was then demultiplexed and converted to standard file formats (BAM and FASTQ files) using the Picard suite.
+
+For the analyses, we have the following datasets at our disposal:
+
+- `hmp2_metadata.csv`: contains the metadata for the samples.
+
+From Metagenomics (MGX) and products sections, we have the following file available:
+
+- `taxonomic_profiles.biom.gz`: contains the taxonomic profiles and **relative abundance metagenomics data** for **stool samples**, in BIOM format.
+
+### Importing raw data
+
+```{r}
+# Importing the metadata
+
+metadata <- read_csv(file.path(data_dir(), "01-raw-data/01-IBD", "hmp2_metadata_2018-08-20.csv"), col_types = cols(.default = "c"))
+
+# Importing the taxonomic profiles
+
+data <- read_biom(file.path(data_dir(), "01-raw-data/01-IBD", "taxonomic_profiles.biom"))
+
 ```
 
-# Healthy cohorts
+```{r}
 
-```{r 00-data-preprocessing, child = '02-healthy-cohorts.qmd'}
-#| eval: true
+n_samples <- nrow(metadata)
+n_features <- ncol(data)
+
 ```
 
-# Supplementary cohorts
+There are `r n_samples` samples and `r n_features` features in the original dataset.
 
-```{r 00-data-preprocessing, child = '03-supplementary-cohorts.qmd'}
+### Creating a taxonomy annotation dataframe
+
+```{r}
+
+df <- data |> biom_data() |> as.matrix() |> t() |> as.data.frame() 
+abundance <- df |> select(contains("k__Bacteria"))
+
+names(abundance) <- str_extract(names(abundance), "[^|]+$")
+
+```
+
+
+```{r}
+
+taxonomy <- 
+  tibble(full_name = names(df)) |>
+  mutate(
+    kingdom = str_extract(full_name, "k__[^|]+"),
+    phylum = str_extract(full_name, "p__[^|]+"),
+    class = str_extract(full_name, "c__[^|]+"),
+    order = str_extract(full_name, "o__[^|]+"),
+    family = str_extract(full_name, "f__[^|]+"),
+    genus = str_extract(full_name, "g__[^|]+"),
+    species = str_extract(full_name, "s__[^|]+")
+  ) |>
+  mutate(
+    taxon = coalesce(
+      species, genus, family, order, class, phylum, kingdom
+    )
+  ) |>
+  mutate(
+    taxon_name = coalesce(
+      str_remove(species, "s__"),
+      str_c(str_remove(genus, "g__"), " (g)"),
+      str_c(str_remove(family, "f__"), " (f)"),
+      str_c(str_remove(order, "o__"), " (o)"),
+      str_c(str_remove(class, "c__"), " (c)"),
+      str_c(str_remove(phylum, "p__"), " (p)"),
+      str_c(str_remove(kingdom, "k__"), " (k)")
+    )
+  ) |>
+  filter(kingdom == "k__Bacteria") |>
+  select(-full_name)
+
+```
+
+::: {.callout-note}
+In the supplementary code provided, the authors filtered out taxa with `_unclassified` annotation. Also, they are also `_nonname` taxa, but they did not filter those out. I filter out both `_unclassified` and `_noname` taxa.
+:::
+
+```{r}
+
+abundance <-
+  abundance |>
+  t() |>
+  as.data.frame() |>
+  bind_cols(taxonomy |> select(taxon)) |>
+  group_by(taxon) |>
+  summarise(across(everything(), sum)) |>
+  column_to_rownames("taxon") |>
+  t() |>
+  as.data.frame()
+
+```
+
+
+```{r}
+
+taxonomy <- 
+  taxonomy |> 
+  distinct(taxon, .keep_all = TRUE) |> 
+  column_to_rownames("taxon")
+
+taxonomy |> glimpse()
+
+```
+
+```{r}
+
+taxonomy <- 
+  taxonomy |> 
+  rownames_to_column("taxon") |>
+  filter(!is.na(species)) |> 
+  column_to_rownames("taxon") |>
+  filter(!str_detect(species, "_unclassified|_noname"))
+
+```
+
+### Documenting abundance distribution
+
+```{r}
+
+abundance <- 
+  abundance |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("taxon") |>
+  filter(taxon %in% rownames(taxonomy)) |> 
+  column_to_rownames("taxon") |>
+  mutate(across(everything(), as.numeric)) |>
+  t() |>
+  as.data.frame()
+
+```
+
+We check if samples rows sum to 1.
+
+```{r}
+
+row_sums <- rowSums(abundance)
+
+if (all(row_sums == 1)) {
+  cat("All samples rows sum to 1.\n")
+} else {
+  cat("Not all samples rows sum to 1.\n")
+}
+
+row_sums |> summary()
+
+```
+
+We renormalize the abundance data to make sure that all samples rows sum to 1 and discard samples for which the sum of relative abundance is 0 (i.e., samples for which we do not have any bacterial species annotation after filtering out unclassified and noname species).
+
+```{r}
+
+dropped <- rownames(abundance)[rowSums(abundance) == 0]
+cat("Dropped samples:\n"); print(dropped)
+
+abundance <- abundance[rowSums(abundance) != 0, ] |> (\(x) x / rowSums(x))()
+
+rowSums(abundance) |> summary()
+
+```
+
+::: {.callout-warning}
+A sample has a taxon with relative abundance of 1. This means that this sample has only one taxon with non-zero relative abundance. However, this taxon was not identified above (before the renormalization), so this is likely due the renormalization step.
+:::
+
+```{r}
+
+# Get sample names where no taxon has a relative abundance > 0
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get the names of taxa that have 0 relative abundance across all samples
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+
+### Documenting available metadata
+
+```{r}
+# we filter out columns with only NA values
+
+metadata_filtered <- metadata |> filter(data_type == "metagenomics") |> select(where(~!all(is.na(.x))))
+samples <- metadata |> clean_names() |> filter(data_type == "metagenomics") |> select(where(~!all(is.na(.x))))
+
+```
+
+The selected variables are: "Project", "External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", and "diagnosis".
+
+```{r}
+
+samples <- 
+  metadata |> 
+  select("External ID", "Participant ID", "data_type", "week_num", "visit_num", "IntervalName", "diagnosis") |>
+  clean_names() |>
+  filter(data_type == "metagenomics") |>
+  column_to_rownames("external_id")
+
+samples |> glimpse()
+
+```
+
+```{r}
+
+samples <- 
+  samples |> 
+  rownames_to_column("sample_id") |>
+  filter(!sample_id %in% dropped) |>
+  column_to_rownames("sample_id")
+
+```
+
+```{r}
+
+samples <-
+  samples |> 
+  rownames_to_column("sample_id") |>
+  dplyr::rename(uid = sample_id, pid = participant_id) |>
+  column_to_rownames("uid")
+
+samples |> glimpse()
+
+```
+
+### Saving cleaned data into a `phyloseq` object
+
+```{r}
+
+ps_ibd <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_ibd
+
+```
+
+```{r}
+
+rm(abundance, metadata, metadata_filtered, samples, taxonomy, df, data)
+
+```
+
+
+## IBS dataset (Mars et al., 2020)
+
+The irritable bowel syndrome (IBS) dataset in Mars et al. (2020) was obtained from [Mendeley data](https://data.mendeley.com/datasets/29n2z5r5ph/3) plateform. 
+
+Metagenomics were performed for 474 stool samples recolted from 77 participants, separated into healthy controls (H),  constipation predominant (IBS-C), diarrhea predominant (IBS-D), or mixed (IBS-M). DNA was extracted from stool samples using the QIAGEN PowerSoil kit and quantified by NanoDrop and PicoGreen assays. Shotgun metagenomic libraries were prepared using a modified Nextera XT protocol and sequenced on either a HiSeq 2500 or NextSeq platform with single-end reads. Samples from three cohorts were randomly distributed across two sequencing runs to reduce batch effects. Reads were trimmed to 100 bp and aligned to a prokaryotic reference genome collection at 97% identity using BURST, with low-depth samples (< 10,000 reads) removed. Functional profiles were generated using KEGG Orthology annotations, and low-abundance gene estimates were further improved using SHOGUN.
+
+For the analyses, we have the following datasets at our disposal:
+
+- `metagenomics.xlsx`: contains the **metagenomics count data** and metadata for biopsy samples, in CSV format. This correspond to the file "Supplementary data I Microbiome data tables stool and biopsy.xlsx" in the plateform (version 3 from 2020-03-11).
+
+### Importing raw data
+
+```{r}
+
+data_biopsy <- readxl::read_excel(file.path(data_dir(), "01-raw-data/02-IBS", "metagenomics.xlsx"), sheet = 2)
+data_stool <- readxl::read_excel(file.path(data_dir(), "01-raw-data/02-IBS", "metagenomics.xlsx"), sheet = 1)
+metadata <- readxl::read_excel(file.path(data_dir(), "01-raw-data/02-IBS", "mmc1.xlsx"), sheet = 2)
+
+```
+
+```{r}
+
+n_samples <- nrow(metadata)
+n_features <- nrow(data_stool)
+
+```
+
+There are `r n_samples` samples and `r n_features` features in the original dataset.
+
+### Cleaning taxonomic annotations
+
+```{r}
+
+abundance <- data_stool |> filter(str_detect(`#OTUID`, "k__Bacteria"))
+
+```
+
+```{r}
+
+taxonomy <-
+  tibble(full_name = abundance$`#OTUID`) |>
+  mutate(
+    kingdom = str_extract(full_name, "k__[^;]+"),
+    phylum = str_extract(full_name, "p__[^;]+"),
+    class = str_extract(full_name, "c__[^;]+"),
+    order = str_extract(full_name, "o__[^;]+"),
+    family = str_extract(full_name, "f__[^;]+"),
+    genus = str_extract(full_name, "g__[^;]+"),
+    species = str_extract(full_name, "s__[^;]+")
+  ) |>
+    mutate(
+    taxon = coalesce(
+      species, genus, family, order, class, phylum, kingdom
+    )
+  ) |>
+  mutate(
+    across(c(species, genus, family, order, class, phylum, kingdom), 
+           ~ str_remove_all(., "\\[|\\]")),
+    taxon_name = coalesce(
+      str_remove(species, "s__"),
+      str_c(str_remove(genus, "g__"), " (g)"),
+      str_c(str_remove(family, "f__"), " (f)"),
+      str_c(str_remove(order, "o__"), " (o)"),
+      str_c(str_remove(class, "c__"), " (c)"),
+      str_c(str_remove(phylum, "p__"), " (p)"),
+      str_c(str_remove(kingdom, "k__"), " (k)")
+    )
+  ) |>
+  select(-full_name)
+
+```
+
+```{r}
+
+cat("There are", nrow(taxonomy |> filter(is.na(species)) == "TRUE"), "features without species annotation.\n")
+
+```
+
+```{r}
 #| eval: false
+
+taxonomy |> 
+  group_by(taxon_name) |> 
+  summarise(n = n()) |> 
+  filter(n > 1) |>
+  gt(caption = "Taxonomic annotation with duplicates")
+
 ```
 
-# MAE integration
+We also delete "Flare" samples, which are samples collected during flare-ups in IBS patients
 
-```{r 00-data-preprocessing, child = '04-MAE-summary.qmd'}
-#| eval: true
+```{r}
+
+abundance <-
+  abundance |>
+  bind_cols(taxonomy |> select(taxon)) |>
+  group_by(taxon) |>
+  summarise(across(-`#OTUID`, sum)) |>
+  column_to_rownames("taxon")
+
+# discard colnames with "Flare"
+
+abundance <- abundance |> select(-contains("Flare"))
+abundance |> head() |> select(1:5)
+
+```
+
+```{r}
+
+# Get the names of taxa that have 0 relative abundance across all samples
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get sample names where no taxon has a relative abundance > 0
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+```{r}
+# we filter out taxa with 0 relative abundance across all samples
+
+abundance <- abundance |> filter(rowSums(abundance) > 0)
+
+```
+
+
+```{r}
+
+taxonomy <- 
+  taxonomy |> 
+  distinct(taxon, .keep_all = TRUE) |> 
+  column_to_rownames("taxon")
+
+# we also filter out taxa with 0 relative abundance across all samples from the taxonomy table
+
+taxonomy <- taxonomy |> filter(rownames(taxonomy) %in% rownames(abundance))
+  
+
+taxonomy |> glimpse()
+
+```
+
+### Documenting available metadata
+
+```{r}
+
+samples <- metadata |> clean_names()
+
+```
+
+```{r}
+
+samples <-
+  metadata |>
+  clean_names() |>
+  mutate(group = ifelse(cohort %in% c("C", "D"), "IBS", cohort),
+         group = group |> factor()) |>
+  mutate(time = str_replace_all(timepoint, c("1st" = "1", "2nd" = "2")),
+         time = time |> factor())
+
+```
+
+```{r}
+
+samples <-
+  samples |>
+  select(sample_id, study_id, time, cohort, group) |>
+  dplyr::rename(
+    uid = sample_id,
+    pid = study_id
+  ) |>
+  column_to_rownames("uid")
+
+samples |> glimpse()
+
+```
+
+We filter out samples that are not present in the abundance data.
+
+```{r}
+
+samples <- samples |> filter(rownames(samples) %in% colnames(abundance))
+samples |> glimpse()
+
+```
+
+
+### Saving cleaned data into a `phyloseq` object
+
+```{r}
+
+ps_ibs <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_ibs
+
+```
+
+## CRC dataset (Yachida et al., 2019)
+
+The colorectal cancer (CRC) dataset in Yashida et al. (2019) was obtained from the DDBJ Sequence Read Archive (DRA) under the names [DRA006684](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA006684) and [DRA008156](https://ddbj.nig.ac.jp/search/entry/sra-submission/DRA008156); however, those are raw sequencing data, and the authors mentioned having used only processed datasets.
+
+Processed datasets seems to be available as [Supplementary Tables](https://www.nature.com/articles/s41591-019-0458-7#Sec23), therefore these will be used for the subsequent analyses.
+
+Stool samples were collected after bowel prep and stored on dry ice. DNA was extracted using bead-beating with a GNOME kit, quality-checked by TapeStation, and stored at −80°C. Sequencing libraries were prepared with the Nextera XT kit and verified for quality before paired-end whole-genome shotgun sequencing on an Illumina HiSeq 2500, generating 150 bp reads with a target output of 5 Gb per sample.
+
+The samples were classified into nine groups according to colonoscopic and histological findings: 
+
+- normal (no remarkable colonoscopic findings) and a few polyps (up to two small (<5 mm) polyps) were classified as "Healthy";
+- multiple polypoid adenomas with low-grade dysplasia and polypoid adenoma(s) with high-grade dysplasia were classified as "MP";
+- stage 0 CRC was classified as "Stage_0"; 
+- stage I CRC and stage II CRC were classified as "Stage_I_II"; 
+- stage III CRC and stage IV CRC were classified as "Stage_III_IV". 
+- the remaining group was normal with a history of colorectal surgery, and was classified as "HS".
+
+We have the following datasets at our disposal:
+
+- `41591_2019_458_MOESM3_ESM.xlsx`: contains the processed datasets for **stool samples**, in Excel format, which contains participants metadata and **metagenomics relative abundance data**. This correspond to the file "Supplementary data 3.xlsx" in the article (version 1 from 2019-11-28).
+
+### Importing raw data
+
+```{r}
+
+data <- read_xlsx(file.path(data_dir(), "01-raw-data/03-CRC", "41591_2019_458_MOESM3_ESM.xlsx"), skip = 3, sheet = 13)
+
+metadata <- read_xlsx(file.path(data_dir(), "01-raw-data/03-CRC", "41591_2019_458_MOESM3_ESM.xlsx"), skip = 2, sheet = 4)
+
+```
+
+```{r}
+
+n_samples <- nrow(metadata)
+n_features <- ncol(data) - 1 # we remove the first column
+
+```
+
+There are `r n_samples` samples and `r n_features` features in the original dataset.
+
+```{r}
+
+abundance <- data |> select(any_of(metadata$Subject_ID))
+
+```
+
+We see that we have `r nrow(metadata)`samples in metadata, and `r ncol(abundance)` samples in abundance data, so there is still a mismatch between the two datasets. We document this below.
+
+```{r}
+
+setdiff(metadata$Subject_ID, colnames(abundance))
+
+```
+
+::: {.callout-note}
+After checking manually, we see that this sample is present in the metadata, but not in the abundance data, so we can simply filter it out from the metadata.
+:::
+
+```{r}
+
+metadata <- metadata |> filter(!Subject_ID %in% setdiff(metadata$Subject_ID, colnames(abundance)))
+
+```
+
+### Creating a taxonomic annotation table
+
+::: {.callout-note}
+We see here that we do not have the complete taxonomy lineage for the features in the abundance data, but only the last available taxonomic level (e.g., species). This will make it difficult to filter the dataset to keep only bacterial species, since we do not have the taxonomic annotation for the kingdom level. I assume that all features in the abundance data are bacterial species.
+:::
+
+```{r}
+
+taxonomy <- 
+  tibble(full_name =  data[1] |> pull()) |>
+  filter(!str_detect(full_name, "-1")) |>
+  mutate(
+    taxon_name = full_name,
+    kingdom = "k_Bacteria",
+    phylum = NA,
+    class = NA,
+    order = NA,
+    family = NA,
+    genus = str_c("g_", word(taxon_name, 1)),
+    species = case_when(
+      word(taxon_name, 2) == "sp." ~ NA,
+      is.na(word(taxon_name, 2)) ~ NA,
+      TRUE ~ str_c("s_", word(taxon_name, 2)),
+    ),
+    taxon = taxon_name
+  ) |>
+  select(kingdom, phylum, class, order, family, genus, species, taxon_name, taxon)
+
+```
+
+```{r}
+  
+cat("There are", nrow(taxonomy |> group_by(taxon_name) |> summarise(n = n()) |> filter(n > 1)), 
+    "duplicated taxonomic annotations.\n")
+
+```
+
+```{r}
+
+taxonomy <- taxonomy |> column_to_rownames("taxon")
+
+taxonomy |> glimpse()
+
+```
+
+```{r}
+
+abundance <- data |> column_to_rownames(var = names(data)[1])
+
+abundance <- abundance |> filter(rownames(abundance) %in% rownames(taxonomy))
+
+```
+
+```{r}
+
+# Get sample names where no taxon has a relative abundance > 0
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get the names of taxa that have 0 relative abundance across all samples
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+
+### Documenting available metadata
+
+```{r}
+
+samples <- metadata |> clean_names()
+
+```
+
+The selected variables are:
+
+- `Subject_ID`: the sample ID, which will be set as row names.
+- `Group`: the health status of the samples.
+
+```{r}
+
+samples <- 
+  metadata |> 
+  clean_names() |> 
+  select(subject_id, group) |>
+  column_to_rownames("subject_id") |>
+  mutate(group = group |> as.factor()) |>
+  mutate(cohort = case_when(
+    group == "Healthy" ~ "H",
+    group %in% c("MP", "Stage_0", "Stage_I_II", "Stage_III_IV") ~ "CRC",
+    group == "HS" ~ NA_character_
+  ))
+
+```
+
+
+```{r}
+
+samples <- samples |> filter(!is.na(cohort)) 
+
+samples |> glimpse()
+
+```
+
+
+```{r}
+
+abundance <- abundance |> select(any_of(rownames(samples)))
+
+abundance |> head() |> select(1:5)
+
+```
+
+### Saving cleaned data into a `phyloseq` object
+
+```{r}
+
+ps_crc <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_crc
+
+```
+
+## CDI dataset (Ferretti et al., 2023)
+
+The *Clostridium difficile* infection (CDI) metagenomics dataset was obtained from the [Github repository](https://github.com/grp-bork/cdifficile_Ferretti_2022/tree/main/data/CDI) associated with the original article from Ferretti et al. (2023). [indicate the date of the latest version for these datasets]. 
+
+For the analysis, we have the following datasets at our disposal: 
+
+- `CDI_mergedControl_samples.csv`: contains metadata for both control and CDI samples, in CSV format.
+- `mOTU20_profiles_filteredCDI.csv`: contains abundance count data for stool samples, in CSV format.
+- `motus_taxonomy.csv`: contains the taxonomic annotation for the features in the abundance data, in CSV format.
+
+::: {.callout-note}
+For the original analysis, the authors filtered out -1 column, column containing "unknown" annotation, and columns with meta-mOTU, which represent metagenomics mOTU.
+:::
+
+### Importing raw data
+
+```{r}
+
+metadata <- read_csv(file.path(data_dir(), "01-raw-data/04-CDI", "CDI_mergedControl_samples.csv"))
+abundance <- read_csv(file.path(data_dir(), "01-raw-data/04-CDI", "mOTU20_profiles_filteredCDI.csv"))
+taxonomy <- read_csv(file.path(data_dir(), "01-raw-data/04-CDI", "motus_taxonomy.csv"))
+
+```
+
+### Documenting the substudies protocols from which the samples were obtained
+
+```{r}
+
+metadata |>
+  janitor::clean_names() |>
+  group_by(study) |>
+  summarise(n = n()) |>
+  gt(caption = "Number of samples per study")
+
+```
+
+### Filtering `unknown` and `meta-mOTU` annotations in the abundance data
+
+```{r}
+
+abundance <- abundance |> column_to_rownames("X1")
+
+```
+
+```{r}
+
+abundance <- abundance |> dplyr::filter_out(str_detect(rownames(abundance), "meta_mOTU|unknown|-1"))
+  
+```
+
+### Creating a taxonomic annotation table from taxonomy data
+
+```{r}
+# filter taxonomy table to only keep selected OTU in abundance
+
+taxonomy <- taxonomy |> filter(mOTU_name %in% rownames(abundance))
+
+```
+
+```{r}
+
+setdiff(rownames(abundance), taxonomy$mOTU_name)
+
+```
+
+We remove this feature from the abundance table, since it does not have a taxonomic annotation in the taxonomy table.
+
+```{r}
+
+abundance <- abundance |> dplyr::filter_out(str_detect(rownames(abundance),"ref_mOTU_v2_2364"))
+
+```
+
+
+```{r}
+
+taxonomy <- 
+  taxonomy |>
+  mutate(
+    taxon_name = coalesce(
+      str_remove(mOTU_name, "\\[.*\\]")),
+    kingdom = "k_Bacteria",
+    phylum = NA,
+    class = NA,
+    order = NA,
+    family = NA,
+    genus = str_c("g_", word(taxon_name, 1)),
+    species = case_when(
+      word(taxon_name, 2) == "sp." ~ NA,
+      is.na(word(taxon_name, 2)) ~ NA,
+      TRUE ~ str_c("s_", word(taxon_name, 2))
+    ),
+    strain = case_when(
+      word(taxon_name, 2) == "sp." & !is.na(word(taxon_name, 3)) & word(taxon_name, 3) != "" ~ str_c("st_", word(taxon_name, 3)),
+      TRUE ~ NA_character_
+    ),
+    taxon = str_c(taxon_name)
+  ) |>
+  select(kingdom, phylum, class, order, family, genus, species, strain, taxon, taxon_name, mOTU_name)
+
+
+taxonomy <- 
+  taxonomy |>
+  mutate(
+    taxon_name = case_when(
+      !is.na(strain) ~ str_c(taxon, "(strain)"),
+      !is.na(species) ~ str_c(taxon),
+      !is.na(genus) ~ str_c(taxon, " (genus)"),
+      !is.na(family) ~ str_c(taxon, " (family)"),
+      !is.na(order) ~ str_c(taxon, " (order)"),
+      !is.na(class) ~ str_c(taxon, " (class)"),
+      !is.na(phylum) ~ str_c(taxon, " (phylum)"),
+      TRUE ~ str_c(taxon, " (kingdom)")
+    )
+  )
+  
+```
+
+
+```{r}
+# filter abundance table and sum counts for features with the same taxonomic annotation
+
+abundance <- abundance |> 
+  rownames_to_column("mOTU_name") |>
+  left_join(taxonomy |> select(mOTU_name, taxon_name), by = "mOTU_name") |>
+  group_by(taxon_name) |>
+  summarise(across(-mOTU_name, sum)) |>
+  column_to_rownames("taxon_name")
+
+```
+
+```{r}
+
+# Get the names of taxa that have 0 relative abundance across all samples
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get sample names where no taxon has a relative abundance > 0
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+```{r}
+# we filter out taxa with 0 relative abundance across all samples
+
+abundance <- abundance |> filter(rowSums(abundance) > 0)
+
+```
+
+```{r}
+
+# we filter taxonomy table to only keep one row per taxonomic annotation
+
+taxonomy <- taxonomy |> group_by(taxon_name) |> dplyr::slice(1) |> ungroup() |> column_to_rownames("taxon_name")
+
+# we filter taxonomy table to only keep taxa with non-zero relative abundance across all samples
+
+taxonomy <- taxonomy |> filter(rownames(taxonomy) %in% rownames(abundance))
+
+```
+
+### Documenting the metadata variables
+
+```{r}
+
+samples <- metadata |> clean_names()
+samples |> glimpse()
+
+```
+
+```{r}
+# set sample names as row names in metadata table
+
+samples <- samples |> column_to_rownames("samples")
+
+```
+
+### Saving cleaned data into a `phyloseq` object
+
+We finally create the `phyloseq` object using the `otu_table`, `tax_table`, and `sample_data` functions from the `phyloseq` package.
+
+```{r}
+
+ps_cdi <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_cdi
+
+```
+
+```{r}
+
+rm(abundance, metadata, taxonomy, samples)
+
+```
+
+# Processing of the supplementary cohorts datasets
+
+## IBD dataset from Fransoza et al. (2019)
+
+### Importing raw data
+
+```{r}
+
+data <- 
+  read_xlsx(file.path(data_dir(), "01-raw-data/07-IBD-Franzosa", "41564_2018_306_MOESM6_ESM.xlsx"), skip = 1) |> 
+  clean_names() |> 
+  column_to_rownames("number_feature_sample")
+
+```
+
+### Constructing metadata table
+
+```{r}
+
+metadata <- 
+  data |> 
+  t() |> 
+  as_tibble(rownames = "uid") |> 
+  select(1:9) |> 
+  column_to_rownames("uid") |> 
+  clean_names()
+
+metadata |> glimpse()
+
+```
+
+We document below the number of samples per diagnosis group in the IBD dataset from Fransoza et al. (2019).
+
+```{r}
+
+metadata |>
+  group_by(diagnosis) |>
+  summarise(n = n()) |>
+  ungroup() |>
+  gt(caption = "Number of samples per diagnosis group in the IBD dataset from Fransoza et al. (2019)")
+
+```
+
+
+### Constructing abundance table
+
+```{r}
+
+abundance <- 
+  data |> 
+  as_tibble(rownames = "uid") |> 
+  slice_tail(n = 201) |>
+  column_to_rownames("uid") |>
+  mutate(across(everything(), as.numeric)) |>
+  t()
+
+```
+
+```{r}
+
+# Get sample names where no taxon has a relative abundance > 0
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get the names of taxa that have 0 relative abundance across all samples
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+### Constructing taxonomy table based on abudance data
+
+Since no taxonomy table is provided in the original dataset, we will construct a taxonomy table based on the abundance data.
+
+```{r}
+
+taxonomy <-
+  tibble(
+    taxon = colnames(abundance),
+    kingdom = "k_Bacteria",
+    phylum = NA,
+    class = NA,
+    order = NA,
+    family = NA,
+    genus = word(taxon, 1, sep = "_"),
+    species = word(taxon, 2, sep = "_")
+  ) |>
+  mutate(
+    species = case_when(
+      species == "sp" ~ NA_character_,
+      TRUE ~ species
+    )
+  ) |>
+  column_to_rownames("taxon")
+
+```
+
+### Creating a `phyloseq` object and saving it for later use
+
+```{r}
+
+ps_ibd_franzosa <- 
+  phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  sample_data(metadata),
+  tax_table(as.matrix(taxonomy))
+)
+
+ps_ibd_franzosa
+
+```
+
+## CRC dataset from Zeller et al. (2014)
+
+### Importing raw data
+
+```{r}
+
+data <- curatedMetagenomicData("ZellerG_2014.relative_abundance", dryrun = FALSE, counts = TRUE)[[1]]
+
+```
+
+### Extracting abundance data from the MAE object
+
+The abundance matrix is a count matrix because we set `counts = TRUE` in the `curatedMetagenomicData` function.
+
+```{r}
+
+abundance <- assay(data, "relative_abundance")
+
+```
+
+### Extracting taxonomy data from the MAE object
+
+
+```{r}
+
+taxonomy <- 
+  data |> 
+  rowLinks() |>
+  as_tibble() |>
+  clean_names() |>
+  select(taxon_name = node_lab) |>
+  separate(taxon_name, into = c("kingdom", "phylum", "class", "order", "family", "genus", "species"), sep = "\\|") |>
+  mutate(taxon = str_remove(species, "s__")) |>
+  column_to_rownames("taxon")
+
+```
+
+We use taxonomy rownames and replace rownames in the abundance matrix.
+
+```{r}
+
+abundance <- abundance |> magrittr::set_rownames(rownames(taxonomy))
+
+```
+
+```{r}
+
+# Get the names of taxa that have 0 relative abundance across all samples
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get sample names where no taxon has a relative abundance > 0
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+### Extracting metadata from the MAE object
+
+```{r}
+
+metadata <- 
+  data |> 
+  colData() |>
+  as_tibble(rownames = "uid") |>
+  clean_names() |>
+  column_to_rownames("uid")
+
+metadata |> glimpse()
+
+```
+
+We document below the number of samples per diagnosis group in the CRC dataset from Zeller et al. (2014).
+
+```{r}
+
+metadata |>
+  group_by(disease, study_condition) |>
+  summarise(n = n()) |>
+  ungroup() |>
+  gt(caption = "Number of samples per diagnosis group in the CRC dataset from Zeller et al. (2014)")
+
+```
+
+
+### Creating a `phyloseq` object and saving it for later use
+
+```{r}
+
+ps_crc_zeller <- 
+  phyloseq(
+    otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+    sample_data(metadata),
+    tax_table(as.matrix(taxonomy))
+  )
+
+ps_crc_zeller
+
+```
+
+## CRC dataset from Wirbel et al. (2018)
+
+### Importing raw data
+
+```{r}
+
+data <- curatedMetagenomicData("WirbelJ_2018.relative_abundance", dryrun = FALSE, counts = TRUE)[[1]]
+
+```
+
+### Extracting abundance data from the MAE object
+
+The abundance matrix is a count matrix because we set `counts = TRUE` in the `curatedMetagenomicData` function.
+
+```{r}
+
+abundance <- assay(data, "relative_abundance")
+
+```
+
+### Extracting taxonomy data from the MAE object
+
+
+```{r}
+
+taxonomy <- 
+  data |> 
+  rowLinks() |>
+  as_tibble() |>
+  clean_names() |>
+  select(taxon_name = node_lab) |>
+  separate(taxon_name, into = c("kingdom", "phylum", "class", "order", "family", "genus", "species"), sep = "\\|") |>
+  mutate(taxon = str_remove(species, "s__")) |>
+  column_to_rownames("taxon")
+
+```
+
+We use taxonomy rownames and replace rownames in the abundance matrix.
+
+```{r}
+
+abundance <- abundance |> magrittr::set_rownames(rownames(taxonomy))
+
+```
+
+```{r}
+
+# Get the names of taxa that have 0 relative abundance across all samples
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get sample names where no taxon has a relative abundance > 0
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+### Extracting metadata from the MAE object
+
+```{r}
+
+metadata <- 
+  data |> 
+  colData() |>
+  as_tibble(rownames = "uid") |>
+  clean_names() |>
+  column_to_rownames("uid")
+
+metadata |> glimpse()
+
+```
+
+We document below the number of samples per diagnosis group in the CRC dataset from Wirbel et al. (2018).
+
+```{r}
+
+metadata |>
+  group_by(disease, study_condition) |>
+  summarise(n = n()) |>
+  ungroup() |>
+  gt(caption = "Number of samples per diagnosis group in the CRC dataset from Wirbel et al. (2018)")
+
+```
+
+
+### Creating a `phyloseq` object and saving it for later use
+
+```{r}
+
+ps_crc_wirbel <- 
+  phyloseq(
+    otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+    sample_data(metadata),
+    tax_table(as.matrix(taxonomy))
+  )
+
+ps_crc_wirbel
+
+```
+
+## CRC dataset from Vogtmann et al. (2016)
+
+### Importing raw data
+
+```{r}
+
+data <- curatedMetagenomicData("VogtmannE_2016.relative_abundance", dryrun = FALSE, counts = TRUE)[[1]]
+
+```
+
+### Extracting abundance data from the MAE object
+
+The abundance matrix is a count matrix because we set `counts = TRUE` in the `curatedMetagenomicData` function.
+
+```{r}
+
+abundance <- assay(data, "relative_abundance")
+
+```
+
+### Extracting taxonomy data from the MAE object
+
+
+```{r}
+
+taxonomy <- 
+  data |> 
+  rowLinks() |>
+  as_tibble() |>
+  clean_names() |>
+  select(taxon_name = node_lab) |>
+  separate(taxon_name, into = c("kingdom", "phylum", "class", "order", "family", "genus", "species"), sep = "\\|") |>
+  mutate(taxon = str_remove(species, "s__")) |>
+  column_to_rownames("taxon")
+
+```
+
+We use taxonomy rownames and replace rownames in the abundance matrix.
+
+```{r}
+
+abundance <- abundance |> magrittr::set_rownames(rownames(taxonomy))
+
+```
+
+```{r}
+
+# Get the names of taxa that have 0 relative abundance across all samples
+rownames(abundance)[rowSums(abundance) == 0]
+
+# Get sample names where no taxon has a relative abundance > 0
+colnames(abundance)[colSums(abundance) == 0]
+
+```
+
+### Extracting metadata from the MAE object
+
+```{r}
+
+metadata <- 
+  data |> 
+  colData() |>
+  as_tibble(rownames = "uid") |>
+  clean_names() |>
+  column_to_rownames("uid")
+
+metadata |> glimpse()
+
+```
+
+We document below the number of samples per diagnosis group in the CRC dataset from Wirbel et al. (2018).
+
+```{r}
+
+metadata |>
+  group_by(disease, study_condition) |>
+  summarise(n = n()) |>
+  ungroup() |>
+  gt(caption = "Number of samples per diagnosis group in the CRC dataset from Wirbel et al. (2018)")
+
+```
+
+
+### Creating a `phyloseq` object and saving it for later use
+
+```{r}
+
+ps_crc_vogtmann <-
+  phyloseq(
+    otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+    sample_data(metadata),
+    tax_table(as.matrix(taxonomy))
+  )
+
+ps_crc_vogtmann
+
 ```
 
 # Saving the preprocessed MAE
+
+We first transform the datasets into `SummarizedExperiment` objects.
+
+```{r}
+
+# Diseased cohorts
+
+se_ibd <- phyloseq_to_SE(ps_ibd)
+se_ibs <- phyloseq_to_SE(ps_ibs)
+se_cdi <- phyloseq_to_SE(ps_cdi)
+se_crc <- phyloseq_to_SE(ps_crc)
+
+# Supplementary cohorts
+
+se_ibd_franzosa <- phyloseq_to_SE(ps_ibd_franzosa)
+se_crc_zeller <- phyloseq_to_SE(ps_crc_zeller)
+se_crc_wirbel <- phyloseq_to_SE(ps_crc_wirbel)
+se_crc_vogtmann <- phyloseq_to_SE(ps_crc_vogtmann)
+
+```
+
+We create below a `MultiAssayExperiment` object that contains all the `SummarizedExperiment` objects.
+
+```{r}
+# Create a list of the SummarizedExperiment objects
+
+se_list <- list(
+  IBD = se_ibd,
+  IBS = se_ibs,
+  CDI = se_cdi,
+  CRC = se_crc,
+  IBD_FRANZOSA = se_ibd_franzosa,
+  CRC_ZELLER = se_crc_zeller,
+  CRC_WIRBEL = se_crc_wirbel,
+  CRC_VOGTMANN = se_crc_vogtmann
+)
+
+```
+
+```{r}
+
+# Create the MultiAssayExperiment object
+
+mae <- MultiAssayExperiment(experiments = se_list)
+
+mae
+
+```
 
 We save the preprocessed MAE object as an RDS file for later use in the downstream analyses.
 

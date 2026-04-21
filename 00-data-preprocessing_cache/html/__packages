@@ -35,3 +35,9 @@ SummarizedExperiment
 ttservice
 tidySummarizedExperiment
 MultiAssayExperiment
+SingleCellExperiment
+XVector
+Biostrings
+TreeSummarizedExperiment
+curatedMetagenomicData
+magrittr

@@ -1,0 +1,829 @@
+---
+title: "Data preprocessing for healthy cohorts"
+author:
+  - Mariam Rahali Masbouri
+date: today 
+format:
+  html:
+    page-layout: full
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+execute:
+  cache: false 
+  warning: false
+project:
+  execute-dir: project
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
+
+In this section, we will first import the relevant datasets from the healthy cohorts, and then perform several descriptive analyses for each of those datasets. The analyses will include: The analyses will include: data cleaning, taxonomic aggregation (if necessary) and rarefaction.
+
+## Human Microbiome Project (HMP) datasets
+
+Two datasets pertaining to the HMP will be directly imported as `phyloseq` objects, available directly via an R package published on [GitHub](https://github.com/twbattaglia/MicrobeDS), originally published in (cite). Both datasets pertains to 16S rRNA gene sequencing data and will be imported using the `data` function from the `MicrobeDS` package. The first dataset, `HMPv13`, contains data sequenced using the V1-V3 regions, while the second dataset, `HMPv35`, was sequenced using V3-V5 regions, both of them containing two time points by participant.
+
+We import those datasets in the chunks below.
+
+```{r}
+
+data("HMPv13")
+HMPv13 <- get("HMPv13")
+
+data("HMPv35")
+HMPv35 <- get("HMPv35")
+
+```
+
+### HMPv13 dataset
+
+We visualize the structure of the `HMPv13` using the `phyloseq` function `sample_data` and `otu_table` in the chunks below.
+
+```{r}
+
+otu <- otu_table(HMPv13) |> as.data.frame()
+sample_data <- sample_data(HMPv13) |> as_tibble()
+tax_table <- tax_table(HMPv13) |> as.data.frame()
+
+```
+
+We first create a new column in the taxonomy dataset to represent the latest available taxonomic rank for each ASV, which will be used in the abundance matrix to aggregate the ASVs at the latest available taxonomic rank.
+
+```{r}
+
+taxonomy <- 
+  tax_table |> 
+  rownames_to_column(var = "ASV") |> 
+  mutate(
+    taxon = case_when(
+      !is.na(Species) ~ str_c(Genus, "_", Species),
+      !is.na(Genus) ~ str_c("g_", Genus),
+      !is.na(Family) ~ str_c("f_", Family),
+      !is.na(Order) ~ str_c("o_", Order),
+      !is.na(Class) ~ str_c("c_", Class),
+      !is.na(Phylum) ~ str_c("p_", Phylum),
+      TRUE ~ "Unclassified"),
+    taxon_names = case_when(
+      !is.na(Species) ~ str_c(Genus, " ", Species),
+      !is.na(Genus) ~ str_c(Genus, " (g)"),
+      !is.na(Family) ~ str_c(Family, " (f)"),
+      !is.na(Order) ~ str_c(Order, " (o)"),
+      !is.na(Class) ~ str_c(Class, " (c)"),
+      !is.na(Phylum) ~ str_c(Phylum, " (p)"),
+      TRUE ~ "Unclassified")
+  )
+
+```
+
+We then aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+abundance <- 
+  otu |> 
+  rownames_to_column(var = "ASV") |> 
+  left_join(taxonomy |> select(ASV, taxon), by = "ASV") |> 
+  group_by(taxon) |> 
+  summarise(across(-ASV, sum)) |> 
+  column_to_rownames(var = "taxon")
+
+```
+
+The taxonomy dataset is also aggregated to only contain one row per unique (latest available level) taxon.
+
+```{r}
+
+taxonomy <-
+  taxonomy |>
+  select(-ASV) |>
+  group_by(taxon) |>
+  summarise(across(everything(), ~ dplyr::first(na.omit(.x)))) |>
+  ungroup() |>
+  column_to_rownames(var = "taxon") |>
+  clean_names()
+
+taxonomy |> glimpse()
+
+```
+
+The dataset pertains not only to stool microbiota data, but also to other microbiomes (oral, vaginal, etc.), but we will only focus on the stool microbiota data for the analyses. Therefore, we subset the abundance and sample metadata to only contain the samples pertaining to the stool microbiota. Also, we create a new column in the sample metadata to create a new sample ID that is more concise and easier to work with, while keeping the original sample names as well.
+
+```{r}
+
+samples <-
+  sample_data |>
+  filter(env == "Stool") |>
+  clean_names() |>
+  dplyr::rename(original_id = x_sample_id) |>
+  select(original_id, env) |>
+  arrange(original_id) |>
+  mutate(
+    sample_id = str_c("HMPv13_", str_pad(row_number(), width = 3, pad = "0")),
+    subject_id = str_c("S", str_pad(ceiling(row_number() / 2), width = 3, pad = "0")),
+    time = case_when(row_number() %% 2 == 1 ~ 1, TRUE ~ 2),
+    sample_names = sample_id
+  ) |>
+  column_to_rownames(var = "sample_names")
+
+samples |> glimpse()
+
+```
+
+The abundance matrix is then subsetted to only contain the samples pertaining to the stool microbiota, and the column names are updated to reflect the new sample IDs.
+
+```{r}
+
+abundance <-
+  abundance |>
+  select(all_of(samples$original_id)) |>
+  set_names(samples$sample_id)
+
+abundance |> head() |> select(1:5)
+
+```
+
+We will then rarefy the HMPv13 dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
+
+First, we separate the dataset into two groups: "healthy" and "diseased" so that rarefaction (and prevalence filtering) is performed separately for the two groups, to avoid biasing the results by removing more samples from one group than the other.
+
+```{r}
+
+tmp <-
+  abundance |>
+  rownames_to_column("taxon") |>
+  pivot_longer(-taxon, names_to = "sample_id", values_to = "count")
+
+```
+
+We show the distribution of sequencing depth across samples, to choose a rarefaction depth.
+
+::: {.callout-note}
+Note that a classical rarefaction threshold would be to simply take the median depth, but in this case, we choose to take the median depth divided by 2, to keep more samples in the dataset.
+:::
+
+```{r}
+
+tmp |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across healthy samples")
+
+```
+
+We will rarefy at a depth of median(depth)/2; this is done in the chucks below, where we also filters out samples with depth < median(depth)/2.
+
+```{r}
+
+tmp_depth <- tmp |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied <- tmp |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together.
+
+```{r}
+
+abundance <- tmp_rarefied |>
+  select(sample_id, taxon, count) |>
+  pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+  column_to_rownames("sample_id")
+
+abundance |> head() |> select(1:5)
+
+```
+
+Since several samples have been removed after rarefaction, we also need to filter the metadata to keep only the samples for which we have abundance data after rarefaction.
+
+```{r}
+
+samples <- samples |> 
+  filter(sample_id %in% rownames(abundance))
+
+```
+
+Finally, we create a new `phyloseq` object using the subsetted abundance matrix, taxonomy dataset, and sample metadata.
+
+```{r}
+
+ps_hmpv13 <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_hmpv13
+
+```
+
+
+### HMPv35 dataset
+
+We visualize the structure of the `HMPv35` using the `phyloseq` function `sample_data` and `otu_table` in the chunks below.
+
+```{r}
+
+otu <- otu_table(HMPv35) |> as.data.frame()
+sample_data <- sample_data(HMPv35) |> as_tibble()
+tax_table <- tax_table(HMPv35) |> as.data.frame()
+
+```
+
+We first create a new column in the taxonomy dataset to represent the latest available taxonomic rank for each ASV, which will be used in the abundance matrix to aggregate the ASVs at the latest available taxonomic rank.
+
+```{r}
+
+taxonomy <- 
+  tax_table |> 
+  rownames_to_column(var = "ASV") |> 
+  mutate(
+    taxon = case_when(
+      !is.na(Species) ~ str_c(Genus, "_", Species),
+      !is.na(Genus) ~ str_c("g_", Genus),
+      !is.na(Family) ~ str_c("f_", Family),
+      !is.na(Order) ~ str_c("o_", Order),
+      !is.na(Class) ~ str_c("c_", Class),
+      !is.na(Phylum) ~ str_c("p_", Phylum),
+      TRUE ~ "Unclassified"),
+    taxon_names = case_when(
+      !is.na(Species) ~ str_c(Genus, " ", Species),
+      !is.na(Genus) ~ str_c(Genus, " (g)"),
+      !is.na(Family) ~ str_c(Family, " (f)"),
+      !is.na(Order) ~ str_c(Order, " (o)"),
+      !is.na(Class) ~ str_c(Class, " (c)"),
+      !is.na(Phylum) ~ str_c(Phylum, " (p)"),
+      TRUE ~ "Unclassified")
+  )
+
+```
+
+We then aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+abundance <- 
+  otu |> 
+  rownames_to_column(var = "ASV") |> 
+  left_join(taxonomy |> select(ASV, taxon), by = "ASV") |> 
+  group_by(taxon) |> 
+  summarise(across(-ASV, sum)) |> 
+  column_to_rownames(var = "taxon")
+
+```
+
+The taxonomy dataset is also aggregated to only contain one row per unique (latest available level) taxon.
+
+```{r}
+
+taxonomy <-
+  taxonomy |>
+  select(-ASV) |>
+  group_by(taxon) |>
+  summarise(across(everything(), ~ dplyr::first(na.omit(.x)))) |>
+  ungroup() |>
+  column_to_rownames(var = "taxon") |>
+  clean_names()
+
+taxonomy |> glimpse()
+
+```
+
+The dataset pertains not only to stool microbiota data, but also to other microbiomes (oral, vaginal, etc.), but we will only focus on the stool microbiota data for the analyses. Therefore, we subset the abundance and sample metadata to only contain the samples pertaining to the stool microbiota. Also, we create a new column in the sample metadata to create a new sample ID that is more concise and easier to work with, while keeping the original sample names as well.
+
+```{r}
+
+samples <-
+  sample_data |>
+  filter(env == "Stool") |>
+  clean_names() |>
+  dplyr::rename(original_id = x_sample_id) |>
+  select(original_id, env) |>
+  arrange(original_id) |>
+  mutate(
+    sample_id = str_c("HMPv13_", str_pad(row_number(), width = 3, pad = "0")),
+    subject_id = str_c("S", str_pad(ceiling(row_number() / 2), width = 3, pad = "0")),
+    time = case_when(row_number() %% 2 == 1 ~ 1, TRUE ~ 2),
+    sample_names = sample_id
+  ) |>
+  column_to_rownames(var = "sample_names")
+
+samples |> glimpse()
+
+```
+
+The abundance matrix is then subsetted to only contain the samples pertaining to the stool microbiota, and the column names are updated to reflect the new sample IDs.
+
+```{r}
+
+abundance <-
+  abundance |>
+  select(all_of(samples$original_id)) |>
+  set_names(samples$sample_id)
+
+abundance |> head() |> select(1:5)
+
+```
+
+We will then rarefy the HMPv13 dataset, so that all samples have the same sequencing depth, and filter out low-abundance taxa. We will use the `rrarefy` function from the `vegan` package to perform rarefaction.
+
+First, we separate the dataset into two groups: "healthy" and "diseased" so that rarefaction (and prevalence filtering) is performed separately for the two groups, to avoid biasing the results by removing more samples from one group than the other.
+
+```{r}
+
+tmp <-
+  abundance |>
+  rownames_to_column("taxon") |>
+  pivot_longer(-taxon, names_to = "sample_id", values_to = "count")
+
+```
+
+We show the distribution of sequencing depth across samples, to choose a rarefaction depth.
+
+::: {.callout-note}
+Note that a classical rarefaction threshold would be to simply take the median depth, but in this case, we choose to take the median depth divided by 2, to keep more samples in the dataset.
+:::
+
+```{r}
+
+tmp |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count)) |>
+  ggplot(aes(x = depth)) +
+  geom_histogram(bins = 50) +
+  geom_vline(aes(xintercept = median(depth)/2), color = "red", linetype = "dashed") +
+  labs(x = "Sequencing depth", y = "Number of samples", caption = "Red dashed line represent median depth divided by 2",
+       subtitle = "Distribution of sequencing depth across healthy samples")
+
+```
+
+We will rarefy at a depth of median(depth)/2; this is done in the chucks below, where we also filters out samples with depth < median(depth)/2.
+
+```{r}
+
+tmp_depth <- tmp |>
+  group_by(sample_id) |>
+  summarise(depth = sum(count), .groups = "drop")
+
+min_depth <- median(tmp_depth$depth) / 2
+
+samples_to_keep <- tmp_depth |>
+  filter(depth >= min_depth) |>
+  pull(sample_id)
+
+cat("Removing", sum(tmp_depth$depth < min_depth), "samples below depth", round(min_depth))
+
+tmp_rarefied <- tmp |>
+    filter(sample_id %in% samples_to_keep) |>
+    select(sample_id, taxon, count) |>
+    pivot_wider(names_from = taxon, values_from = count) |>
+    column_to_rownames("sample_id") |>
+    rrarefy(sample = min_depth) |>
+    as.data.frame() |>
+    rownames_to_column("sample_id") |>
+    pivot_longer(-sample_id, names_to = "taxon", values_to = "count") |>
+    group_by(sample_id) |>
+    mutate(rel_ab = count / sum(count)) |>
+    ungroup()
+
+```
+
+We convert the rarefied data back to wide format, and we merge the healthy and diseased datasets back together.
+
+```{r}
+
+abundance <- tmp_rarefied |>
+  select(sample_id, taxon, count) |>
+  pivot_wider(names_from = taxon, values_from = count, values_fill = 0) |>
+  column_to_rownames("sample_id")
+
+abundance |> head() |> select(1:5)
+
+```
+
+Since several samples have been removed after rarefaction, we also need to filter the metadata to keep only the samples for which we have abundance data after rarefaction.
+
+```{r}
+
+samples <- samples |> filter(sample_id %in% rownames(abundance))
+
+```
+
+Finally, we create a new `phyloseq` object using the subsetted abundance matrix, taxonomy dataset, and sample metadata.
+
+```{r}
+
+ps_hmpv35 <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_hmpv35
+
+```
+
+## NIBIOHN and MORINAGA cohors datasets
+
+The NIBIOHN and MORINAGA cohorts datasets were obtained from the original paper from (). The datasets were sequenced using 16S rRNA gene sequencing, but only raw reads are explicitly available. Nonetheless, I found that the authors shared a xxx as Supplementary Material, which can alternatively be used for the analyses.
+
+Therefore, we have the following datasets at our disposal:
+
+- `12866_2021_2215_MOESM7_ESM.xlsx`: This dataset contains the gut microbiota composition data for the NIBIOHN and MORINAGA cohorts, which can be used for the analyses. The dataset is in Excel format and contains two sheets, one for each cohort, with the abundance data for each ASV in each sample.
+
+We import those datasets in the chunks below.
+
+```{r}
+
+data_NIBIOHN <- read_xlsx(file.path(data_dir(), "01-raw-data/05-NIBIOHN-MORINAGA", "12866_2021_2215_MOESM7_ESM.xlsx"), skip = 2, sheet = 1)
+data_MORINAGA <- read_xlsx(file.path(data_dir(), "01-raw-data/05-NIBIOHN-MORINAGA", "12866_2021_2215_MOESM7_ESM.xlsx"), skip = 2, sheet = 2)
+
+```
+
+A first look at the dataset shows that the relative abundances are scaled from 0 to 100 instead of from 0 to 1, which is the standard for relative abundance data. We will check this below, and if this is the case, we will scale the abundances back to the 0-1 range by dividing the abundance values by 100.
+
+```{r}
+
+data_NIBIOHN |> column_to_rownames(var = names(data_NIBIOHN)[1]) |> rowSums()
+data_MORINAGA |> column_to_rownames(var = names(data_MORINAGA)[1]) |> rowSums()
+
+```
+
+Since the abundances are indeed scaled from 0 to 100, we will scale them back to the 0-1 range by dividing the abundance values by 100. We will also renormalize the abundances so that they sum to 1 for each sample, to ensure that the data is in the correct format for downstream analyses.
+
+```{r}
+
+renorm <- function(df) {
+  df |>
+    column_to_rownames(var = names(df)[1]) |>
+    decostand(method = "total") |>
+    rownames_to_column(var = names(df)[1])
+}
+
+```
+
+
+```{r}
+
+data_NIBIOHN <- renorm(data_NIBIOHN)
+data_MORINAGA <- renorm(data_MORINAGA)
+
+```
+
+
+### NIBIOHN cohort dataset
+
+We first create a taxonomy dataset for the NIBIOHN cohort dataset, which will be used to aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+taxonomy <- 
+  tibble(full_names = names(data_NIBIOHN)[-1]) |>
+  mutate(
+    kingdom = "k_Bacteria",
+    phylum  = str_extract(full_names, "(?<=D\\.1\\.\\.)[^_]+"),
+    class   = str_extract(full_names, "(?<=D\\.2\\.\\.)[^_]+"),
+    order   = str_extract(full_names, "(?<=D\\.3\\.\\.)[^_]+"),
+    family  = str_extract(full_names, "(?<=D\\.4\\.\\.)[^_]+"),
+    genus   = str_extract(full_names, "(?<=D\\.5\\.\\.)[^_]+"),
+    species = str_extract(full_names, "(?<=D\\.6\\.\\.)[^_]+")
+  ) |>
+  mutate(
+    taxon_names =
+      case_when(
+        !is.na(species) ~ str_c(genus, " ", species),
+        !is.na(genus) ~ str_c(genus, " (g)"),
+        !is.na(family) ~ str_c(family, " (f)"),
+        !is.na(order) ~ str_c(order, " (o)"),
+        !is.na(class) ~ str_c(class, " (c)"),
+        !is.na(phylum) ~ str_c(phylum, " (p)"),
+        TRUE ~ "Unclassified"),
+    taxon = case_when(
+      !is.na(species) ~ str_c(genus, "_", species),
+      !is.na(genus) ~ str_c("g_", genus),
+      !is.na(family) ~ str_c("f_", family),
+      !is.na(order) ~ str_c("o_", order),
+      !is.na(class) ~ str_c("c_", class),
+      !is.na(phylum) ~ str_c("p_", phylum),
+      TRUE ~ "Unclassified")
+  )
+
+```
+
+We check if there are any duplicated taxa in the taxonomy dataset, which will affect the aggregation of the abundance matrix.
+
+```{r}
+
+taxonomy |> dplyr::count(taxon) |> filter(n > 1) |> gt(caption = "Duplicated taxa in the taxonomy dataset")
+
+```
+
+
+::: {.callout-note}
+The duplicates in the taxonomy dataset are exclusively uncultured bacteria at the genus level, for visualization purposes, these will be aggregated, but we will keep them separated for now.
+:::
+
+We then aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+abundance <- 
+  data_NIBIOHN |>
+  column_to_rownames(var = names(data_NIBIOHN)[1]) |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column(var = "full_names") |>
+  left_join(taxonomy |> select(full_names, taxon), by = "full_names") |>
+  group_by(taxon) |>
+  summarise(across(-full_names, sum)) |>
+  column_to_rownames(var = "taxon")
+
+```
+
+We also aggregate the taxonomy dataset to only contain one row per unique (latest available level) taxon. Note: All samples belong the the genus level.
+
+```{r}
+
+taxonomy <- 
+  taxonomy |>
+  group_by(taxon) |>
+  summarise(
+    across(everything(), ~ dplyr::first(na.omit(.x)))
+  ) |>
+  ungroup() |>
+  column_to_rownames(var = "taxon") |>
+  select(-full_names)
+
+```
+
+::: {.callout-warning}
+Since no metadata is available for the NIBIOHN cohort dataset, we create a sample dataset with sample ID, and the samples' type (stool samples in this case).
+:::
+
+```{r}
+
+samples <- 
+  tibble(
+    sample_id = colnames(abundance),
+    sample_type = "stool"
+  ) |>
+  column_to_rownames(var = "sample_id")
+
+```
+
+Finally, we create a new `phyloseq` object using the subsetted abundance matrix, taxonomy dataset, and sample metadata.
+
+```{r}
+
+ps_NIBIOHN <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_NIBIOHN
+
+```
+
+### MORINAGA cohort dataset
+
+We first create a taxonomy dataset for the MORINAGA cohort dataset, which will be used to aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+taxonomy <- 
+  tibble(full_names = names(data_MORINAGA)[-1]) |>
+  mutate(
+    kingdom = "k_Bacteria",
+    phylum  = str_extract(full_names, "(?<=D\\.1\\.\\.)[^_]+"),
+    class   = str_extract(full_names, "(?<=D\\.2\\.\\.)[^_]+"),
+    order   = str_extract(full_names, "(?<=D\\.3\\.\\.)[^_]+"),
+    family  = str_extract(full_names, "(?<=D\\.4\\.\\.)[^_]+"),
+    genus   = str_extract(full_names, "(?<=D\\.5\\.\\.)[^_]+"),
+    species = str_extract(full_names, "(?<=D\\.6\\.\\.)[^_]+")
+  ) |>
+  mutate(
+    taxon_names =
+      case_when(
+        !is.na(species) ~ str_c(genus, " ", species),
+        !is.na(genus) ~ str_c(genus, " (g)"),
+        !is.na(family) ~ str_c(family, " (f)"),
+        !is.na(order) ~ str_c(order, " (o)"),
+        !is.na(class) ~ str_c(class, " (c)"),
+        !is.na(phylum) ~ str_c(phylum, " (p)"),
+        TRUE ~ "Unclassified"),
+    taxon = case_when(
+      !is.na(species) ~ str_c(genus, "_", species),
+      !is.na(genus) ~ str_c("g_", genus),
+      !is.na(family) ~ str_c("f_", family),
+      !is.na(order) ~ str_c("o_", order),
+      !is.na(class) ~ str_c("c_", class),
+      !is.na(phylum) ~ str_c("p_", phylum),
+      TRUE ~ "Unclassified")
+  )
+
+```
+
+We check if there are any duplicated taxa in the taxonomy dataset, which will affect the aggregation of the abundance matrix.
+
+```{r}
+
+taxonomy |> dplyr::count(taxon) |> filter(n > 1) |> gt(caption = "Duplicated taxa in the taxonomy dataset")
+
+```
+
+
+::: {.callout-note}
+The duplicates in the taxonomy dataset are exclusively uncultured bacteria at the genus level, for visualization purposes, these will be aggregated, but we will keep them separated for now.
+:::
+
+We then aggregate the abundance matrix at the latest available taxonomic rank.
+
+```{r}
+
+abundance <- 
+  data_MORINAGA |>
+  column_to_rownames(var = names(data_MORINAGA)[1]) |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column(var = "full_names") |>
+  left_join(taxonomy |> select(full_names, taxon), by = "full_names") |>
+  group_by(taxon) |>
+  summarise(across(-full_names, sum)) |>
+  column_to_rownames(var = "taxon")
+
+```
+
+We also aggregate the taxonomy dataset to only contain one row per unique (latest available level) taxon. Note: All samples belong the the genus level.
+
+```{r}
+
+taxonomy <- 
+  taxonomy |>
+  group_by(taxon) |>
+  summarise(
+    across(everything(), ~ dplyr::first(na.omit(.x)))
+  ) |>
+  ungroup() |>
+  column_to_rownames(var = "taxon") |>
+  select(-full_names)
+
+```
+
+::: {.callout-warning}
+Since no metadata is available for the MORINAGA cohort dataset, we create a sample dataset with sample ID, and the samples' type (stool samples in this case).
+:::
+
+```{r}
+
+samples <- 
+  tibble(
+    sample_id = colnames(abundance),
+    sample_type = "stool"
+  ) |>
+  column_to_rownames(var = "sample_id")
+
+```
+
+Finally, we create a new `phyloseq` object using the subsetted abundance matrix, taxonomy dataset, and sample metadata.
+
+```{r}
+
+ps_MORINAGA <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = TRUE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+ps_MORINAGA
+
+```
+
+
+## Dietary intervention cohort datasets
+
+The datasets involving the dietary interventions were obtained from the original paper from (). The datasets were sequenced using 16S rRNA gene sequencing, but only raw sequences are explicitly available. Nonetheless, I found that the authors shared a gut microbiota composition dataset as Supplementary Material, which can alternatively be used for the analyses.
+
+The study protocol involved fecal samples collected at different times, with control samples (C) and test samples (T). Specifically, fecal samples were collected at baseline (T1 and C1), after 2 weeks (T2 and C2), and after 4 weeks (T3 and C3) of the dietary intervention periods.
+
+For the analyses, we have the following dataset at our disposal:
+
+- `nutrients-1853911-supplementary_tables.xlsx`: This dataset contains stool microbiota composition data for this cohort. The dataset is in Excel format and contains several sheets, with the abundance data for each ASV in each sample.
+
+```{r}
+
+data <- read_xlsx(file.path(data_dir(), "01-raw-data/06-DIET", "nutrients-1853911-supplementary_tables.xlsx"), sheet = 6)
+
+```
+
+Since no metadata is available for this cohort dataset, we create a sample dataset with sample ID, the samples' type (stool samples in this case), and the group and time point information for each sample (C1, C2, C3, T1, T2, T3).
+
+```{r}
+
+samples <- 
+  tibble(
+    sample_id = names(data)[-1],
+    sample_type = "stool",
+    group = ifelse(str_detect(sample_id, "C"), "control", "test"),
+    subgroup = case_when(
+      str_detect(sample_id, "C1|T1") ~ "baseline",
+      str_detect(sample_id, "C2|T2") ~ "2_weeks",
+      str_detect(sample_id, "C3|T3") ~ "4_weeks",
+      TRUE ~ NA_character_
+    ),
+    time = case_when(
+      str_detect(sample_id, "C1|T1") ~ 1,
+      str_detect(sample_id, "C2|T2") ~ 2,
+      str_detect(sample_id, "C3|T3") ~ 3,
+      TRUE ~ NA_real_
+    )
+  ) |>
+  column_to_rownames(var = "sample_id")
+
+```
+
+The abundance matrix is created by setting the first column as row names.
+
+```{r}
+
+abundance <- data |> column_to_rownames(var = names(data)[1]) |> t() |> as.data.frame()
+
+```
+
+We check if the samples (rows) sum to 1, which is the standard for relative abundance data. If not, we will scale the abundances so that they sum to 1 for each sample.
+
+```{r}
+
+abundance |> rowSums()
+
+```
+Since the samples sum to 1, we can proceed by creating the taxonomy annotation dataframe. After manually looking at the taxonomy annotation, we see that all taxa are annotated at the genus level. 
+
+```{r}
+
+taxonomy <-
+  tibble(
+    full_names = colnames(abundance),
+    kingdom = "k_Bacteria",
+    phylum = NA,
+    class = NA,
+    order = NA,
+    family = NA,
+    genus = full_names,
+    species = NA,
+    taxon_names = str_c(full_names, " (g)"),
+    taxon = str_c("g_", full_names)
+  ) |>
+  column_to_rownames(var = "full_names")
+
+```
+
+Finally, we create a new `phyloseq` object using the subsetted abundance matrix, taxonomy dataset, and sample metadata.
+
+```{r}
+
+ps_DIET <- phyloseq(
+  otu_table(as.matrix(abundance), taxa_are_rows = FALSE),
+  tax_table(as.matrix(taxonomy)),
+  sample_data(samples)
+)
+
+```
+
+
+```{r}
+#| include: false
+
+rm(data, data_NIBIOHN, data_MORINAGA, taxonomy, abundance, samples, HMPv13, HMPv35, otu, sample_data, tax_table)
+
+```
+
