@@ -1,7 +1,9 @@
 ---
-title: "Reanalysis for comment on the article by Munoz et al. (Science, 2026)"
+title: "Comments on 'Imbalance in gut microbial interactions
+as a marker of health and disease' from Corral López et al. (2026)"
 author:
   - Mariam Rahali Masbouri
+  - Karoline Faust
 date: today 
 format:
   html:
@@ -21,3 +23,16 @@ editor: source
 editor_options: 
   chunk_output_type: inline
 ---
+
+## Introduction
+
+> Explain the motivation for the commentary, the main claims of the original article, and the main points that will be discussed in the commentary.
+
+## Results and discussion
+
+> CRC results only?
+> ENBI?
+
+## Conclusion
+
+

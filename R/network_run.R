@@ -63,18 +63,19 @@ run_flashweave <- function(matrix, sensitive = TRUE, heterogeneous = FALSE) {
   })
 }
 
+# main bootstrap function
 
 run_network_bootstrap <- function(matrix, run_fn, n_bootstrap = 500, subsample_pcts = c(0.7, 0.8, 0.9), prevalence_threshold = 0.2, max_attempts = 50,
                           output_file = NULL, ...) {
   
-  all_network_results   <- list()
+  all_network_results <- list()
   all_diversity_results <- list()
   
   for (pct in subsample_pcts) {
     cat("Running bootstrap with", pct * 100, "% subsampling\n")
     
     seen_hashes <- new.env(hash = TRUE, parent = emptyenv())
-    iter     <- 0
+    iter <- 0
     attempts <- 0
     
     while (iter < n_bootstrap && attempts < max_attempts) {
@@ -96,7 +97,7 @@ run_network_bootstrap <- function(matrix, run_fn, n_bootstrap = 500, subsample_p
       
       metrics <- compute_diversity_metrics(matrix_sub)
       
-      all_network_results   <- c(all_network_results,   list(get_network_df(network, pct, iter, nrow(matrix_filtered))))
+      all_network_results <- c(all_network_results,   list(get_network_df(network, pct, iter, nrow(matrix_filtered))))
       all_diversity_results <- c(all_diversity_results, list(metrics |> mutate(fraction = pct, iteration = iter)))
     }
     

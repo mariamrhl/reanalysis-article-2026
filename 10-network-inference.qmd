@@ -75,6 +75,26 @@ $$\rho = \frac{\sum_{i \neq j} (w_{ij}^+ + w_{ij}^-)}{\sum_{i \neq j} (w_{ij}^+ 
 
 where $w_{ij}^+$ and $w_{ij}^-$ denote the positive and negative edge weights between taxa i and j respectively.For directed inference tools (BEEM-Static, LIMITS), both directions $w_{ij}$ and $w_{ji}$ are included. For undirected tools (FlashWeave), each pair is counted once. The ratio remains comparable across tools as any double-counting cancels in the ratio.
 
+The following parameters were set for network inference tools:
+
+* *FlashWeave*: FlashWeave is a network inference tool developed by the Von Mering research group (Tackmann et al., 2019). It operates within a Probabilistic Graphical Model framework, enabling the integration of metadata and the prediction of direct microbial interactions from heterogeneous microbial abundance datasets.
+
+```{r}
+#| include: true
+#| eval: true
+
+library(JuliaCall)
+julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
+julia_eval('using FlashWeave')
+julia_eval('import FlashWeave: learn_network, save_network, load_data')
+julia_eval('println(methods(learn_network))')
+
+```
+
+As per the original article, FlashWeave was run with its default parameters, and `heterogeneous = FALSE` was chosen, in accordance with the original article. We run FlashWeave on bootstrap iterations with the function `run_network_bootstrap()` that we defined in the R/ directory. This function takes as input a dataset in matrix form, a network inference function (in this case, `run_flashweave()`, which is also defined in the R/ directory), and the parameters for the bootstrap iterations. The function returns a list of results for each bootstrap iteration, which can be used to compute the statistics of interest (PEP, Sheldon evenness, Shannon diversity, richness, and net interactions), summarized with the function `get_stats_df()`. The parameters for the bootstrap iterations are as follows: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`, and no prevalence threshold. Additionally, the parameters from `get_stats_df()` are set to `symmetric = TRUE` since FlashWeave returns undirected edges.
+
+* **BEEM-Static**: BEEM-Static is a network inference tool developed by the xxx. We run BEEM-Static on bootstrap iterations with the function `run_network_bootstrap()`, using the `run_beem_static()` function that we defined in the R/ directory. The parameters for the bootstrap iterations are as follows: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`, and a `prevalence_threshold = 0.3`. Additionally, the parameters from `get_stats_df()` are set to `symmetric = FALSE` since BEEM-Static returns directed edges.
+
 # Importing the MAE object
 
 ```{r}
@@ -97,9 +117,10 @@ mae
 
 # Network inference for main cohorts
 
-## Network inference for IBD cohort (Lloyd-Price et al. 2019)
+## IBD cohort (Lloyd-Price et al. 2019)
 
 ```{r}
+#| eval: false
 
 tmp <-
   mae[["IBD"]] |>
@@ -116,6 +137,7 @@ tmp <-
 ```
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(diagnosis == "nonIBD")
 tmp_diseased <- tmp |> filter(diagnosis == "UC" | diagnosis == "CD")
@@ -141,26 +163,6 @@ diseased_df <-
 ```
 
 ### FlashWeave
-
-In this section, we will apply FlashWeave to the different groups (healthy and diseased) separately.
-
-FlashWeave is a network inference tool developed by the Von Mering research group (Tackmann et al., 2019). It operates within a Probabilistic Graphical Model framework, enabling the integration of metadata and the prediction of direct microbial interactions from heterogeneous microbial abundance datasets.
-
-We first begin by loading the Julia package FlashWeave using the `JuliaCall` package in R. This package enables us to run Julia code from R.
-
-```{r}
-#| include: true
-#| eval: true
-
-library(JuliaCall)
-julia_setup(JULIA_HOME = "C:/Users/maria/.julia/juliaup/julia-1.12.5+0.x64.w64.mingw32/bin")
-julia_eval('using FlashWeave')
-julia_eval('import FlashWeave: learn_network, save_network, load_data')
-julia_eval('println(methods(learn_network))')
-
-```
-
-As per the original article, FlashWeave was run with its default parameters, and `heterogeneous = FALSE` was chosen, in accordance with the original article. We run FlashWeave on bootstrap iterations with the function `run_network_bootstrap()` that we defined in the R/ directory. This function takes as input a dataset in matrix form, a network inference function (in this case, `run_flashweave()`, which is also defined in the R/ directory), and the parameters for the bootstrap iterations. The function returns a list of results for each bootstrap iteration, which can be used to compute the statistics of interest (PEP, Sheldon evenness, Shannon diversity, richness, and net interactions), summarized with the function `get_stats_df()`. The parameters for the bootstrap iterations are as follows: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`, and no prevalence threshold. Additionally, the parameters from `get_stats_df()` are set to `symmetric = TRUE` since FlashWeave returns undirected edges.
 
 ```{r}
 #| eval: false
@@ -210,113 +212,15 @@ df_res <-
 ```{r}
 #| fig-height: 10
 #| fig-width: 12
-# PEP plot
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group",
-       subtitle = "Comparison of PEP between healthy and diseased \nsamples in the IBD cohort") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group",
-       subtitle = "Comparison of evenness between healthy and \ndiseased samples in the IBD cohorts") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group",
-       subtitle = "Comparison of Shannon diversity between healthy and \ndiseased samples in the IBD cohort") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group",
-       subtitle = "Comparison of richness between healthy and \ndiseased samples in the IBD cohort") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + patchwork::plot_annotation(title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "IBD") + patchwork::plot_annotation(title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1.5) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.015,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group",
-       title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -326,71 +230,14 @@ df_res |>
 #| fig-height: 6
 #| fig-width: 12
 
-
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-
-  df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-patchwork::plot_layout(nrow = 1) + patchwork::plot_annotation(title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + patchwork::plot_annotation(title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
-
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.015,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", 
-       title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interactions in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interactions in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -422,50 +269,35 @@ df_res <-
 ```
 
 ```{r}
-#| fig-height: 6
+#| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(ncol = 2) + patchwork::plot_annotation(title = "BEEM-Static results for the IBD cohort (Lloyd-Price et al., 2019)", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "IBD") + patchwork::plot_annotation(title = "BEEM-Static results for the IBD cohort (Lloyd-Price et al., 2019)", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
-## Network inference for IBS cohort (Mars et al. 2020)
+```{r}
+
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "BEEM-Static results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+```{r}
+#| fig-height: 6
+#| fig-width: 12
+
+plot_network_results(df_res) + patchwork::plot_annotation(title = "BEEM-Static results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "BEEM-Static results for the IBD cohort (Lloyd-Price et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interactions in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+
+## IBS cohort (Mars et al. 2020)
 
 ```{r}
 
@@ -552,209 +384,16 @@ beepr::beep(2)
 
 ```
 
-```{r}
-#| fig-height: 10
-#| fig-width: 12
-# PEP plot
-
-# df_res |>
-#   ggplot() +
-#   aes(x = group, y = pep, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group",
-#        subtitle = "Comparison of PEP between healthy and diseased \nsamples in the IBS cohort") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-#   
-#   df_res |>
-#   ggplot() +
-#   aes(x = group, y = sheldon, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group",
-#        subtitle = "Comparison of evenness between healthy and \ndiseased samples in the IBS cohorts") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-#   
-# # shannon diversity
-# df_res |>
-#   ggplot() +
-#   aes(x = group, y = shannon, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group",
-#        subtitle = "Comparison of Shannon diversity between healthy and \ndiseased samples in the IBS cohort") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-#   
-# # richness
-# df_res |>
-#   ggplot() +
-#   aes(x = group, y = shannon, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Richness", color = "Group", fill = "Group",
-#        subtitle = "Comparison of richness between healthy and \ndiseased samples in the IBS cohort") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-#   
-#   patchwork::plot_layout(nrow = 2) + patchwork::plot_annotation(title = "FlashWeave results for the IBS cohort (Mars et al. 2020)", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
-
-```
-
-> ...
-
-We will now check if there is any correlation between Sheldon evenness and PEP in the plot below.
-
-```{r}
-
-# df_res |>
-#   ggplot() +
-#   aes(x = sheldon, y = pep, color = group, fill = group) +
-#   geom_point(alpha = 0.6, size = 1.5) +
-#   geom_smooth(method = "lm", se = TRUE) +
-#   geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-#               se = TRUE, inherit.aes = FALSE,
-#               color = "black", linetype = "dashed") +
-#   ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-#                    method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-#                    size = 3, show.legend = FALSE) +
-#   ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-#                    inherit.aes = FALSE, color = "black",
-#                    label.x.npc = "left", label.y.npc = 0.015,
-#                    size = 3) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group",
-#        title = "FlashWeave results for the IBS cohort (Mars et al. 2020)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
-
-```
-
-> ...
-
-We also check if the results for net interactions (rho) are consistent with the PEP results, and if there is any significant difference between healthy and diseased samples in terms of net interactions.
-
-```{r}
-#| fig-height: 6
-#| fig-width: 12
-
-
-# df_res |>
-#   ggplot() +
-#   aes(x = group, y = rho, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-# 
-#   df_res |>
-#   ggplot() +
-#   aes(x = group, y = pep, color = group, fill = group) +
-#   geom_violin(alpha = 0.4, color = NA) +
-#   geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-#   stat_compare_means(
-#     comparisons = list(c("Healthy", "Diseased")),
-#     method = "wilcox.test",
-#     label = "p.signif",
-#     tip.length = 0.01,
-#     bracket.size = 0.8,
-#     fontface = "bold"
-#   ) +
-#   
-# patchwork::plot_layout(nrow = 1) + patchwork::plot_annotation(title = "FlashWeave results for the IBS cohort (Mars et al. 2020)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
-
-```
-
-> ...
-
-We will check correlation between net interaction and Sheldon evenness in the plot below.
-
-```{r}
-
-# df_res |>
-#   ggplot() +
-#   aes(x = sheldon, y = rho, color = group, fill = group) +
-#   geom_point(alpha = 0.6, size = 1) +
-#   geom_smooth(method = "lm", se = TRUE) +
-#   geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-#               se = TRUE, inherit.aes = FALSE,
-#               color = "black", linetype = "dashed") +
-#   ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-#                    method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-#                    size = 3, show.legend = FALSE) +
-#   ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-#                    inherit.aes = FALSE, color = "black",
-#                    label.x.npc = "left", label.y.npc = 0.015,
-#                    size = 3) +
-#   scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-#   facet_wrap(~ fraction) +
-#   labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", 
-#        title = "FlashWeave results for the IBS cohort (Mars et al. 2020)", subtitle = "Correlation between Sheldon evenness and net interactions in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
-
-```
-
 ### BEEM-Static
 
 ```{r}
 
 ```
 
-## Network inference for CDI cohort (Ferretti et al., 2023)
+## CDI cohort (Ferretti et al., 2023)
 
 ```{r}
+#| eval: false
 
 tmp <-
   mae[["CDI"]] |>
@@ -775,6 +414,7 @@ tmp <-
 ```
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(subject_disease_status == "CTR")
 tmp_diseased <- tmp |> filter(subject_disease_status == "CDI")
@@ -850,135 +490,14 @@ df_res <-
 #| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +  
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +  
-  
-  patchwork::plot_layout(nrow = 2) + patchwork::plot_annotation(title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison of PEP, evenness, Shannon diversity and richness between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "CDI")+ patchwork::plot_annotation(title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison of PEP, evenness, Shannon diversity and richness between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
-# we rank total relative abundances for each taxa and check the most abundant ones
 
-tmp_healthy |>
-  group_by(taxon) |>
-  summarise(total_rel_ab = sum(rel_ab)) |>
-  mutate(proportion = total_rel_ab / sum(total_rel_ab)) |>
-  arrange(desc(proportion)) |>
-  select(taxon, proportion) |>
-  slice_head(n = 5) |>
-  gt(caption = "Top 5 most abundant taxa in healthy CDI samples (proportion of total relative abundance)") |>
-  fmt_percent(columns = "proportion", decimals = 2)
-
-tmp_diseased |>
-  group_by(taxon) |>
-  summarise(total_rel_ab = sum(rel_ab)) |>
-  mutate(proportion = total_rel_ab / sum(total_rel_ab)) |>
-  arrange(desc(proportion)) |>
-  select(taxon, proportion) |>
-  slice_head(n = 5) |>
-  gt(caption = "Top 5 most abundant taxa in diseased CDI samples (proportion of total relative abundance)") |>
-  fmt_percent(columns = "proportion", decimals = 2)
-
-
-```
-
-
-We will now check if there is any correlation between Sheldon evenness and PEP in the plot below.
-
-```{r}
-
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.010,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -988,44 +507,7 @@ We also compute the net interactions (rho) in the healthy and diseased samples a
 #| fig-height: 6
 #| fig-width: 12
 
-
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
@@ -1033,32 +515,14 @@ We check correlation between net interaction and Sheldon evenness in the plot be
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.12,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.01,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ```
 
-## Network inference for CRC cohort (Yachida et al., 2019)
+## CRC cohort (Yachida et al., 2019)
 
 ```{r}
+#| eval: false
 
 tmp <-
   mae[["CRC"]] |>
@@ -1078,6 +542,7 @@ tmp <-
 
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(cohort == "H")
 tmp_diseased <- tmp |> filter(cohort == "CRC")
@@ -1151,105 +616,14 @@ We plot the results below.
 #| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "CRC") + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -1258,348 +632,23 @@ df_res |>
 #| fig-height: 6
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group",
-       title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)",
-       subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples",
-       caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
 # Network inference for supplementary cohorts
 
-## Network inference for CRC cohort (Zeller et al., 2014)
-
-```{r}
-
-tmp <-
-  mae[["CRC_ZELLER"]] |>
-  assay() |>
-  t() |>
-  as.data.frame() |>
-  rownames_to_column("uid") |>
-  pivot_longer(-uid, names_to = "taxon", values_to = "count") |>
-  group_by(uid) |>
-  mutate(rel_ab = count/sum(count)) |>
-  left_join(
-    mae[["CRC_ZELLER"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, disease),
-    by = join_by(uid)
-  )
-
-```
-
-```{r}
-
-tmp_healthy <- tmp |> filter(disease == "healthy")
-tmp_diseased <- tmp |> filter(disease == "CRC")
-
-# for healthy samples
-
-healthy_df <-
-  tmp_healthy |>
-  select(uid, taxon, rel_ab) |>
-  pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("uid") |>
-  t()
-
-# for diseased samples
-
-diseased_df <-
-  tmp_diseased |>
-  select(uid, taxon, rel_ab) |>
-  pivot_wider(names_from = taxon, values_from = rel_ab) |>
-  column_to_rownames("uid") |>
-  t()
-
-```
-
-### FlashWeave
-
-In the chunk code below, we run FlashWeave on all taxa for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`. This means that in each bootstrap iteration, we will subsample the data at different percentages (60%, 70%, and 80%) and run FlashWeave on the subsampled data. 
+## IBD cohort (Franzosa et al., 2019)
 
 ```{r}
 #| eval: false
-res_healthy <- run_network_bootstrap(healthy_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
-
-saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_zeller_20260419.rds"))
-
-beepr::beep(2)
-
-res_diseased <- run_network_bootstrap(diseased_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
-
-saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_zeller_20260419.rds"))
-
-beepr::beep(2)
-
-```
-
-We load the results in the chunk code below.
-
-```{r}
-
-res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_zeller_20260419.rds"))
-res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_zeller_20260419.rds"))
-
-```
-
-
-```{r}
-
-df_res_healthy <- get_stats_df(res_healthy, symmetric = TRUE)
-df_res_diseased <- get_stats_df(res_diseased, symmetric = TRUE)
-
-df_res <-
-  bind_rows(
-    df_res_healthy |> mutate(group = "Healthy"),
-    df_res_diseased |> mutate(group = "Diseased")
-  )
-
-```
-
-
-```{r}
-#| fig-height: 10
-#| fig-width: 12
-
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
-
-```
-
-
-```{r}
-
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
-
-```
-
-
-```{r}
-#| fig-height: 6
-#| fig-width: 12
-
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
-
-```
-
-
-```{r}
-
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group",
-       title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)",
-       subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples",
-       caption = "Correlation is computed with Pearson's correlation test")
-
-```
-
-
-## Network inference for IBD cohort (Franzosa et al., 2019)
-
-```{r}
 
 tmp <-
   mae[["IBD_FRANZOSA"]] |>
@@ -1618,6 +667,7 @@ tmp <-
 ```
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(diagnosis == "Control")
 tmp_diseased <- tmp |> filter(diagnosis == "CD" | diagnosis == "UC")
@@ -1690,105 +740,14 @@ df_res <-
 #| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "IBD") + plot_annotation(title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -1797,77 +756,143 @@ df_res |>
 #| fig-height: 6
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group",
-       title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)",
-       subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples",
-       caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the IBD cohort (Franzosa et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+## CRC cohort (Zeller et al., 2014)
+
+```{r}
+#| eval: false
+
+tmp <-
+  mae[["CRC_ZELLER"]] |>
+  assay() |>
+  t() |>
+  as.data.frame() |>
+  rownames_to_column("uid") |>
+  pivot_longer(-uid, names_to = "taxon", values_to = "count") |>
+  group_by(uid) |>
+  mutate(rel_ab = count/sum(count)) |>
+  left_join(
+    mae[["CRC_ZELLER"]] |> colData() |> as_tibble(rownames = "uid") |> select(uid, disease),
+    by = join_by(uid)
+  )
+
+```
+
+```{r}
+#| eval: false
+
+tmp_healthy <- tmp |> filter(disease == "healthy")
+tmp_diseased <- tmp |> filter(disease == "CRC")
+
+# for healthy samples
+
+healthy_df <-
+  tmp_healthy |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+# for diseased samples
+
+diseased_df <-
+  tmp_diseased |>
+  select(uid, taxon, rel_ab) |>
+  pivot_wider(names_from = taxon, values_from = rel_ab) |>
+  column_to_rownames("uid") |>
+  t()
+
+```
+
+### FlashWeave
+
+In the chunk code below, we run FlashWeave on all taxa for healthy and diseased samples separately, with the following parameters: `n_bootstrap = 100`, `subsample_pcts = c(0.6, 0.7, 0.8)`, `max_attempts = 120`. This means that in each bootstrap iteration, we will subsample the data at different percentages (60%, 70%, and 80%) and run FlashWeave on the subsampled data. 
+
+```{r}
+#| eval: false
+
+res_healthy <- run_network_bootstrap(healthy_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+
+saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_CRC_zeller_20260419.rds"))
+
+beepr::beep(2)
+
+res_diseased <- run_network_bootstrap(diseased_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+
+saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_CRC_zeller_20260419.rds"))
+
+beepr::beep(2)
+
+```
+
+We load the results in the chunk code below.
+
+```{r}
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/flashweave_res_healthy_CRC_zeller_20260419.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/flashweave_res_diseased_CRC_zeller_20260419.rds"))
 
 ```
 
 
-## Network inference for CRC cohort (Wirbel et al., 2018)
+```{r}
+
+df_res_healthy <- get_stats_df(res_healthy, symmetric = TRUE)
+df_res_diseased <- get_stats_df(res_diseased, symmetric = TRUE)
+
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
+
+```
+
 
 ```{r}
+#| fig-height: 10
+#| fig-width: 12
+
+plot_diversity_results(df_res, cohort_name = "CRC") + patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+
+```{r}
+#| fig-height: 6
+#| fig-width: 12
+
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Zeller et al., 2014)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+## CRC cohort (Wirbel et al., 2018)
+
+```{r}
+#| eval: false
 
 tmp <-
   mae[["CRC_WIRBEL"]] |>
@@ -1886,6 +911,7 @@ tmp <-
 ```
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(disease == "healthy")
 tmp_diseased <- tmp |> filter(disease == "CRC")
@@ -1950,105 +976,14 @@ df_res <-
 #| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "CRC") + plot_annotation(title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
@@ -2057,67 +992,14 @@ df_res |>
 #| fig-height: 6
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
+plot_correlation_results(df_res, variable_name = "rho") +
   labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group",
        title = "FlashWeave results for the CRC cohort (Wirbel et al., 2018)",
        subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples",
@@ -2125,9 +1007,10 @@ df_res |>
 
 ```
 
-## Network inference for CRC cohort (Vogtmann et al., 2016)
+## CRC cohort (Vogtmann et al., 2016)
 
 ```{r}
+#| eval: false
 
 tmp <-
   mae[["CRC_VOGTMANN"]] |>
@@ -2147,6 +1030,7 @@ tmp <-
 
 
 ```{r}
+#| eval: false
 
 tmp_healthy <- tmp |> filter(disease == "healthy")
 tmp_diseased <- tmp |> filter(disease == "CRC")
@@ -2214,104 +1098,14 @@ df_res <-
 #| fig-height: 10
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-df_res |>
-  ggplot() +
-  aes(x = group, y = sheldon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Sheldon evenness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# shannon diversity
-df_res |>
-  ggplot() +
-  aes(x = group, y = shannon, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Shannon diversity", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-# richness
-df_res |>
-  ggplot() +
-  aes(x = group, y = richness, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Richness", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 2) + plot_annotation(title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_diversity_results(df_res, cohort_name = "CRC")+ plot_annotation(title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = pep, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = pep), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = pep), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
+plot_correlation_results(df_res, variable_name = "pep") +
   labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
@@ -2321,67 +1115,14 @@ df_res |>
 #| fig-height: 6
 #| fig-width: 12
 
-df_res |>
-  ggplot() +
-  aes(x = group, y = rho, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-df_res |>
-  ggplot() +
-  aes(x = group, y = pep, color = group, fill = group) +
-  geom_violin(alpha = 0.4, color = NA) +
-  geom_point(position = position_jitter(width = 0.1), alpha = 0.6, size = 1) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
-  labs(x = "", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group") +
-  stat_compare_means(
-    comparisons = list(c("Healthy", "Diseased")),
-    method = "wilcox.test",
-    label = "p.signif",
-    tip.length = 0.01,
-    bracket.size = 0.8,
-    fontface = "bold"
-  ) +
-  
-  patchwork::plot_layout(nrow = 1) + plot_annotation(title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
 
 ```
 
 
 ```{r}
 
-df_res |>
-  ggplot() +
-  aes(x = sheldon, y = rho, color = group, fill = group) +
-  geom_point(alpha = 0.6, size = 1) +
-  geom_smooth(method = "lm", se = TRUE) +
-  geom_smooth(aes(x = sheldon, y = rho), method = "lm",
-              se = TRUE, inherit.aes = FALSE,
-              color = "black", linetype = "dashed") +
-  ggpubr::stat_cor(aes(label = after_stat(paste(r.label, p.label, sep = "~`,`~"))),
-                   method = "pearson", label.x.npc = "left", label.y.npc = 0.10,
-                   size = 3, show.legend = FALSE) +
-  ggpubr::stat_cor(aes(x = sheldon, y = rho), method = "pearson",
-                   inherit.aes = FALSE, color = "black",
-                   label.x.npc = "left", label.y.npc = 0.001,
-                   size = 3) +
-  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
-  facet_wrap(~ fraction) +
+plot_correlation_results(df_res, variable_name = "rho") +
   labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group",
        title = "FlashWeave results for the CRC cohort (Vogtmann et al., 2016)",
        subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples",
