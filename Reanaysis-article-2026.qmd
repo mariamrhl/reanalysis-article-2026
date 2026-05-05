@@ -1,6 +1,6 @@
 ---
-title: "Comments on 'Imbalance in gut microbial interactions
-as a marker of health and disease' from Corral López et al. (2026)"
+title: "Comments on 'Imbalance in gut microbial interactionsas a marker of health and disease' from Corral López et al. (2026)"
+bibliography: references.bib
 author:
   - Mariam Rahali Masbouri
   - Karoline Faust
@@ -8,13 +8,15 @@ date: today
 format:
   html:
     page-layout: full
-    code-fold: true
+    code-fold: false
+    code-tools: false
     toc: true
     toc-location: left
     theme: cosmo
     number-sections: true
     embed-resources: true
 execute:
+  echo: false
   cache: false 
   warning: false
 project:
@@ -24,15 +26,569 @@ editor_options:
   chunk_output_type: inline
 ---
 
+```{r}
+#| include: false
+#| label: setup
+
+library(readr)
+library(biomformat) # BiocManager::install("biomformat")
+library(stringr)
+library(remotes)
+library(phyloseq)
+library(MicrobeDS) # remotes::install_github("twbattaglia/MicrobeDS")
+library(readxl)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(janitor)
+library(gt)
+library(vegan)
+library(quarto)
+library(ggpubr)
+library(seqtime) # remotes::install_github("hallucigenia-sparsa/seqtime")
+library(beemStatic) # remotes::install_github('lch14forever/beem-static')
+library(SummarizedExperiment) # BiocManager::install("SummarizedExperiment")
+library(MultiAssayExperiment) # BiocManager::install("MultiAssayExperiment")
+
+tmp <- fs::dir_map("R", source)
+rm(tmp)
+
+theme_set(theme_light())
+
+```
+
+```{r}
+#| include: false
+
+reset <- FALSE
+
+```
+
+
 ## Introduction
 
-> Explain the motivation for the commentary, the main claims of the original article, and the main points that will be discussed in the commentary.
+The human gut microbiome is a complex ecological system in which microbial interactions are thought to play a central role in maintaining host health and contributing to disease. In this context, @CorralLopez2026 proposed that an imbalance in microbial interactions, quantified through an ecological index (ENBI), constitutes a universal signature of disease across multiple gut-related conditions, which includes inflammatory bowel disease (IBD), irritable bowel syndrome (IBS), colorectal cancer (CRC), and *Clostridioides difficile* infection (CDI). Specifically, they reported that diseased microbiomes are characterized by a predominance of positive interactions, whereas healthy microbiomes exhibit more negative interactions, suggesting that ENBI could serve as a universal biomarker of disease. Such a claim, if robust, would have important implications for microbiome-based diagnostics and our understanding of microbial ecology in disease. However, as this will be developed, we believe the generalizability of this pattern across datasets and conditions remains to be established.
+
+In this study, we reassessed microbial interaction patterns by quantifying net interactions, defined as the balance between positive and negative associations inferred from microbial networks, as used in the ENBI framework, across multiple independent datasets. Using different network inference methods and resampling strategies, we examined whether the reported interaction imbalance consistently distinguishes healthy and diseased microbiomes across conditions.
 
 ## Results and discussion
 
-> CRC results only?
-> ENBI?
+We analyzed multiple gut microbiome datasets from inflammatory bowel disease (IBD), *Clostridioides difficile* infection (CDI), and colorectal cancer (CRC), including both primary (used by @CorralLopez2026) and independent validation cohorts. Sample sizes and features for each dataset are summarized in @tbl-summary-main and @tbl-summary-supp. All datasets were processed in `00-data-preprocessing.qmd` (see GitHub repository), and microbial interaction networks were inferred using both FlashWeave and BEEM-Static, combined with resampling strategies for bootstrapping.
+
+```{r}
+
+# import latest MAE
+
+mae_file <- 
+  fs::dir_ls(str_c(data_dir(), "/02-processed-data"), regexp = "MAE_processed_.*\\.rds$") |> 
+  sort(decreasing = TRUE) |>
+  magrittr::extract(1)
+
+mae <- readRDS(mae_file)
+
+rm(mae_file)
+
+```
+
+```{r}
+#| include: false
+
+group_var <- c(IBD = "diagnosis", CDI = "group", CRC = "cohort", CRC_VOGTMANN = "disease", CRC_ZELLER = "disease", CRC_WIRBEL = "disease", IBD_FRANZOSA = "diagnosis")
+
+tbl <- map_dfr(names(group_var), function(ds) {
+  
+  mat <- mae[[ds]] |> assay()
+  meta <- colData(mae[[ds]]) |> as.data.frame()
+  
+  gvar <- group_var[[ds]]
+  
+  tibble(
+    dataset = ds,
+    group = meta[[gvar]]
+  ) |>
+    group_by(dataset, group) |>
+    summarise(
+      n_samples = n(),
+      n_taxa = nrow(mat),
+      .groups = "drop"
+    )
+})
+
+tbl_clean <- tbl |>
+  filter(group != "adenoma") |>
+  mutate(
+    group = case_when(
+      group %in% c("CD", "UC") ~ "IBD",
+      group %in% c("nonIBD", "Control", "control", "healthy", "H") ~ "healthy",
+      TRUE ~ group
+    )
+  ) |>
+  group_by(dataset, group) |>
+  summarise(
+    n_samples = sum(n_samples),
+    n_taxa = dplyr::first(n_taxa),
+    .groups = "drop"
+  )
+
+tbl_clean <- tbl_clean |>
+  mutate(dataset = recode(dataset,
+    IBD = "IBD (Lloyd-Price et al., 2019)",
+    CDI = "CDI (Ferretti et al., 2023)",
+    CRC = "CRC (Yachida et al., 2019)",
+    CRC_ZELLER = "CRC (Zeller et al., 2014)",
+    CRC_WIRBEL = "CRC (Wirbel et al., 2018)",
+    CRC_VOGTMANN = "CRC (Vogtmann et al., 2016)",
+    IBD_FRANZOSA = "IBD (Franzosa et al., 2018)"
+  ))
+
+
+```
+
+```{r}
+#| label: tbl-summary-main
+#| tbl-cap: "Summary of the number of samples and taxa in each main dataset, stratified by disease status."
+
+tbl_clean |>
+  filter(
+    dataset %in% c("CDI (Ferretti et al., 2023)", "CRC (Yachida et al., 2019)", "IBD (Lloyd-Price et al., 2019)")
+    ) |>
+  gt(rowname_col = "group", groupname_col = "dataset") |>
+  tab_stub_indent(
+    rows = everything(),
+    indent = 5
+  ) |>
+  opt_align_table_header(align = "left")
+
+```
+
+```{r}
+#| label: tbl-summary-supp
+#| tbl-cap: "Summary of the number of samples and taxa in each main dataset, stratified by disease status."
+
+tbl_clean |>
+  filter(
+    dataset %in% c("CRC (Zeller et al., 2014)", "CRC (Wirbel et al., 2018)", "CRC (Vogtmann et al., 2016)", "IBD (Franzosa et al., 2018)")
+    ) |>
+  gt(rowname_col = "group", groupname_col = "dataset") |>
+  tab_stub_indent(
+    rows = everything(),
+    indent = 5
+  ) |>
+  opt_align_table_header(align = "left")
+
+```
+
+```{r}
+# Load datasets
+
+if (reset) {
+  
+  df_res_main_IBD_flashweave <- process_data("IBD", "flashweave", symmetric = TRUE)
+  df_res_main_CDI_flashweave <- process_data("CDI", "flashweave", symmetric = TRUE)
+  df_res_main_CRC_flashweave <- process_data("CRC", "flashweave", symmetric = TRUE)
+  
+  df_res_main_IBD_beem <- process_data("IBD", "beem", symmetric = FALSE)
+  # df_res_main_CDI_beem <- process_data("CDI", "beem", symmetric = FALSE)
+  df_res_main_CRC_beem <- process_data("CRC", "beem", symmetric = FALSE)
+  
+  df_res_supp_IBD_franzosa_flashweave <- process_data("IBD_franzosa", "flashweave", symmetric = TRUE)
+  df_res_supp_CRC_vogtmann_flashweave <- process_data("CRC_vogtmann", "flashweave", symmetric = TRUE)
+  df_res_supp_CRC_wirbel_flashweave <- process_data("CRC_wirbel", "flashweave", symmetric = TRUE)
+  df_res_supp_CRC_zeller_flashweave <- process_data("CRC_zeller", "flashweave", symmetric = TRUE)
+  
+  # Combine all datasets
+  df_res_main_flashweave <- bind_rows(df_res_main_IBD_flashweave, df_res_main_CDI_flashweave, df_res_main_CRC_flashweave)
+  df_res_main_beem <- bind_rows(df_res_main_IBD_beem, df_res_main_CRC_beem)
+  df_res_supp_flashweave <- bind_rows(df_res_supp_IBD_franzosa_flashweave, df_res_supp_CRC_vogtmann_flashweave,
+                                      df_res_supp_CRC_wirbel_flashweave, df_res_supp_CRC_zeller_flashweave)
+
+  # Save the final combined datasets
+  saveRDS(df_res_main_flashweave, file = str_c(result_dir(), "/df_res_main_flashweave_", today() |> str_remove_all("-"),".rds"))
+  saveRDS(df_res_main_beem, file = str_c(result_dir(), "/df_res_main_beem_", today() |> str_remove_all("-"),".rds"))
+  saveRDS(df_res_supp_flashweave, file = str_c(result_dir(), "/df_res_supp_flashweave_", today() |> str_remove_all("-"),".rds"))
+  
+  rm(
+    df_res_main_IBD_flashweave, df_res_main_CDI_flashweave, df_res_main_CRC_flashweave,
+    df_res_main_IBD_beem, df_res_main_CRC_beem,
+    df_res_supp_IBD_franzosa_flashweave, df_res_supp_CRC_vogtmann_flashweave, df_res_supp_CRC_wirbel_flashweave,
+    df_res_supp_CRC_zeller_flashweave
+  )
+  
+} else {
+  
+  df_res_main_flashweave <- 
+      readRDS(
+      file = 
+        list.files(result_dir(), pattern = "df_res_main_flashweave_.*\\.rds$", full.names = TRUE) |> 
+        sort() |> 
+        tail(1)
+      )
+  
+  df_res_main_beem <-
+    readRDS(
+      file = 
+        list.files(result_dir(), pattern = "df_res_main_beem_.*\\.rds$", full.names = TRUE) |> 
+        sort() |> 
+        tail(1)
+      )
+  
+  df_res_supp_flashweave <-
+    readRDS(
+      file =
+        list.files(result_dir(), pattern = "df_res_supp_flashweave_.*\\.rds$", full.names = TRUE) |> 
+        sort() |> 
+        tail(1)
+      )
+}
+
+```
+
+We first examined the CRC dataset from @Yachida2019. Contrary to the pattern reported by @CorralLopez2026, net interaction values were significantly higher in healthy samples compared to diseased samples. This result directly opposes the proposed universal shift toward positive interactions in disease. Importantly, this trend was consistent across network inference methods (FlashWeave and BEEM-Static), subsampling fractions, and was further supported by Positive Edge Percentage (PEP) analyses (@fig-main-CRC; Supp. Fig. -@fig-CRC-pep).
+
+```{r}
+#| label: fig-main-CRC
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "Net interactions results for the CRC dataset from @Yachida2019 across 60, 70 and 80% subsampling on 100 bootstrap iterations. (A) Net interactions results for the CRC dataset using the FlashWeave tool assuming homogeneous samples (`heterogeneous = FALSE`). (B) Net interactions results for the CRC dataset using the BEEM-Static tool with 30% prevalence filtering."
+  
+p1 <- df_res_main_flashweave |>
+  filter(disease == "CRC") |>
+  ggplot() +
+  aes(x = group, y = rho, color = group, fill = group) +
+  geom_boxplot(alpha = 0.4) +
+  geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  ggh4x::facet_nested(cols = vars(fraction)) +
+  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold",
+    size = 4
+  ) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+p2 <- df_res_main_beem |>
+  filter(disease == "CRC") |>
+  ggplot() +
+  aes(x = group, y = rho, color = group, fill = group) +
+  geom_boxplot(alpha = 0.4) +
+  geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+  scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+  ggh4x::facet_nested(cols = vars(fraction)) +
+  labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+  stat_compare_means(
+    comparisons = list(c("Healthy", "Diseased")),
+    method = "wilcox.test",
+    label = "p.signif",
+    tip.length = 0.01,
+    bracket.size = 0.8,
+    fontface = "bold",
+    size = 4
+  ) +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+
+(p1 + p2) + plot_layout(ncol = 2, guides = "collect") + plot_annotation(tag_levels = "A") & theme(legend.position = "bottom")
+
+```
+
+To assess whether this discrepancy was dataset-specific, we analyzed additional CRC cohorts [@Vogtmann2016; @Wirbel2019 @Zeller2014]. In these datasets, net interactions were generally higher in diseased samples, in agreement with previous reports. However, a substantial overlap between healthy and diseased samples was consistently observed across all cohorts (@fig-supp-CRC). This overlap suggests that, even when group-level differences exist, net interaction values might not be universally more positive in diseased samples.
+
+```{r}
+#| label: fig-supp-CRC
+#| fig-width: 12
+#| fig-height: 5
+#| fig-cap: "Net interactions results for the supplementary CRC dataset across 60, 70 and 80% subsampling on 100 bootstrap iterations using the FlashWeave tool, assuming homogeneous samples (`heterogeneous = FALSE`). (A) Net interactions results for the CRC dataset from @Vogtmann2016. (B) Net interactions results for the CRC dataset from @Wirbel2019. (c) Net interactions results for the CRC dataset from @Zeller2014."
+
+df_res_supp_flashweave |>
+    filter(disease == "CRC_vogtmann") |>
+    ggplot() +
+    aes(x = group, y = rho, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  
+df_res_supp_flashweave |>
+    filter(disease == "CRC_zeller") |>
+    ggplot() +
+    aes(x = group, y = rho, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  
+df_res_supp_flashweave |>
+    filter(disease == "CRC_wirbel") |>
+    ggplot() +
+    aes(x = group, y = rho, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  
+patchwork::plot_layout(ncol = 3, guides = "collect") + plot_annotation(tag_levels = "A") & theme(legend.position = "bottom")
+
+
+```
+
+In contrast to CRC, both IBD [@LloydPrice2019] and CDI [@Ferretti2023] datasets showed significantly higher net interaction values in diseased samples compared to healthy controls (@fig-main-CDI-IBD). These findings are consistent with the interaction imbalance pattern described by @CorralLopez2026. Similar trends were observed in the independent IBD cohort from @Franzosa2018, and were robust across inference methods (Supp. Figs. -@fig-IBD-supp and -@fig-IBD-beem).
+
+```{r}
+#| label: fig-main-CDI-IBD
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "Net interactions results for the CDI [@Ferretti2023] and IBD dataset [@LloydPrice2019] across 60, 70 and 80% subsampling on 100 bootstrap iterations. (A) Net interactions results for the IBD dataset using the FlashWeave tool assuming homogeneous samples (`heterogeneous = FALSE`). (B) Net interactions results for the CDI dataset using the FlashWeave tool assuming homogeneous samples (`heterogeneous = FALSE`)."
+
+df_res_main_flashweave |>
+    filter(disease == "IBD") |>
+    ggplot() +
+    aes(x = group, y = rho, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  
+df_res_main_flashweave |>
+    filter(disease == "CDI") |>
+    ggplot() +
+    aes(x = group, y = rho, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+
+patchwork::plot_layout(ncol = 2, guides = "collect") + plot_annotation(tag_levels = "A") & theme(legend.position = "bottom")
+
+```
+
 
 ## Conclusion
 
+In this work, we reassessed the relationship between microbial interaction imbalance and disease status across multiple gut microbiome datasets. While increased net positive interactions in diseased samples were observed in IBD and CDI, this pattern was not consistent across all conditions. Notably, the CRC dataset from @Yachida2019 exhibited the opposite trend, with higher net interaction values in healthy samples, a result that was robust across inference methods and subsampling strategies. Moreover, even in datasets where statistically significant differences were detected, with diseased samples exhibiting more positive net interactions, substantial overlap between healthy and diseased samples was observed. Taken together, these findings do not support the claim that microbial interaction imbalance constitutes a universal signature of disease, but rather suggest that such metrics are context-dependent.
+
+## References
+
+::: {#refs}
+:::
+
+## Supplementary Figures {.unnumbered}
+
+```{r}
+#| label: fig-CRC-pep
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "PEP results for the CRC dataset from @Yachida2019 on 100 bootstrap iterations. (A) PEP results for the CRC dataset using the FlashWeave tool assuming homogeneous samples (`heterogeneous = FALSE`) across 60, 70 and 80% subsampling. (B) PEP results for the CRC dataset using the BEEM-Static tool with a 30% prevalence filtering across 70, 80 and 90% subsampling ."
+
+# CRC with PEP
+
+df_res_main_flashweave |>
+    filter(disease == "CRC") |>
+    ggplot() +
+    aes(x = group, y = pep, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) + 
+  
+  df_res_main_beem |>
+    filter(disease == "CRC") |>
+    ggplot() +
+    aes(x = group, y = pep, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) + 
+  
+patchwork::plot_layout(ncol = 2, guides = "collect") + plot_annotation(tag_levels = "A") & theme(legend.position = "bottom")
+
+```
+
+```{r}
+#| label: fig-IBD-supp
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "Net interactions results for the IBD dataset from @Franzosa2018 across 60, 70 and 80% subsampling on 100 bootstrap iterations using the FlashWeave tool assuming homogeneous samples (`heterogeneous = FALSE`)."
+
+
+# IBD dataset from @Franzosa2018
+
+df_res_supp_flashweave |>
+    filter(disease == "IBD_franzosa") |>
+    ggplot() +
+    aes(x = group, y = pep, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom"
+  )
+
+```
+
+```{r}
+#| label: fig-IBD-beem
+#| fig-width: 7
+#| fig-height: 5
+#| fig-cap: "Net interactions results for the IBD dataset from @Franzosa2018 across 70, 80 and 90% subsampling on 100 bootstrap iterations using the BEEM-Static tool with a 30% prevalence filtering."
+
+
+# IBD dataset main with BEEM-Static
+
+df_res_main_beem |>
+    filter(disease == "IBD") |>
+    ggplot() +
+    aes(x = group, y = pep, color = group, fill = group) +
+    geom_boxplot(alpha = 0.4) +
+    geom_point(position = position_jitter(width = 0.2), alpha = 0.4, size = 1) +
+    scale_color_manual(values = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    scale_fill_manual(values  = c("Healthy" = "#0078B9", "Diseased" = "#EA0017")) +
+    ggh4x::facet_nested(cols = vars(fraction)) +
+    labs(x = "", y = "Net interactions", color = "Group", fill = "Group") +
+    stat_compare_means(
+      comparisons = list(c("Healthy", "Diseased")),
+      method = "wilcox.test",
+      label = "p.signif",
+      tip.length = 0.01,
+      bracket.size = 0.8,
+      fontface = "bold",
+      size = 4
+    ) +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "bottom"
+  )
+
+
+```
 

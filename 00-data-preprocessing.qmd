@@ -1380,3 +1380,34 @@ saveRDS(mae, file.path(data_dir(), "02-processed-data", str_c("MAE_processed_", 
 
 ```
 
+# Appendix A: Summary table
+
+```{r}
+
+group_var <- c(IBD = "diagnosis", CDI = "group", CRC = "cohort", CRC_VOGTMANN = "disease", CRC_ZELLER = "disease", CRC_WIRBEL = "disease", IBD_FRANZOSA = "diagnosis")
+
+tbl <- map_dfr(names(group_var), function(ds) {
+  
+  mat <- mae[[ds]] |> assay()
+  meta <- colData(mae[[ds]]) |> as.data.frame()
+  
+  gvar <- group_var[[ds]]
+  
+  tibble(
+    dataset = ds,
+    group = meta[[gvar]]
+  ) |>
+    group_by(dataset, group) |>
+    summarise(
+      n_samples = n(),
+      n_taxa = nrow(mat),
+      .groups = "drop"
+    )
+})
+
+tbl |> group_by(dataset) |> gt()
+
+```
+
+
+

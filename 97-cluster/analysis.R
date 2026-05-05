@@ -178,8 +178,8 @@ beem_CRC_healthy <- run_network_bootstrap(CRC_healthy, run_fn = run_beem_static,
 beem_CRC_diseased <- run_network_bootstrap(CRC_diseased, run_fn = run_beem_static, n_bootstrap = 100, prevalence_threshold = 0.3, max_attempts = 100)
 
 ### CDI datasets
-beem_CDI_healthy <- run_network_bootstrap(CDI_healthy, run_fn = run_beem_static, n_bootstrap = 100, prevalence_threshold = 0.3, max_attempts = 100)
-beem_CDI_diseased <- run_network_bootstrap(CDI_diseased, run_fn = run_beem_static, n_bootstrap = 100, prevalence_threshold = 0.3, max_attempts = 100)
+beem_CDI_healthy <- run_network_bootstrap(CDI_healthy, run_fn = run_beem_static, n_bootstrap = 100, prevalence_threshold = 0.6, max_attempts = 100)
+beem_CDI_diseased <- run_network_bootstrap(CDI_diseased, run_fn = run_beem_static, n_bootstrap = 100, prevalence_threshold = 0.6, max_attempts = 100)
 
 ## Save results
 

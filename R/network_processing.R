@@ -122,4 +122,41 @@ get_stats_df <- function(bootstrap_results, symmetric = FALSE) {
   bind_rows(metrics)
 }
 
+process_data <- function(disease_name, tool_name, symmetric = TRUE) {
+  
+  healthy_file <- list.files(
+    result_dir(),
+    pattern = paste0("^", tool_name, "_res_healthy_", disease_name, "_[0-9]{8}\\.rds$"),
+    full.names = TRUE
+  ) |>
+    sort() |>
+    tail(1)
+  
+  diseased_file <- list.files(
+    result_dir(),
+    pattern = paste0("^", tool_name, "_res_diseased_", disease_name, "_[0-9]{8}\\.rds$"),
+    full.names = TRUE
+  ) |>
+    sort() |>
+    tail(1)
+  
+  res_healthy <- readRDS(file = healthy_file)
+  res_diseased <- readRDS(file = diseased_file)
+  
+
+  df_res_healthy <- get_stats_df(res_healthy, symmetric = TRUE)
+  df_res_diseased <- get_stats_df(res_diseased, symmetric = TRUE)
+  
+  df_res <- bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  ) |>
+    mutate(disease = disease_name, tool = tool_name)
+  
+  rm(res_healthy, res_diseased, df_res_healthy, df_res_diseased)
+  
+  return(df_res)
+}
+
+
 

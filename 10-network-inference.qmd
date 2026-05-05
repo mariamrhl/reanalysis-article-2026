@@ -246,8 +246,8 @@ plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon even
 ```{r}
 # import file from cluster
 
-res_healthy <- readRDS(file = str_c(result_dir(), "/00-raw-beem-static/beem_IBD_healthy_20260414.rds"))
-res_diseased <- readRDS(file = str_c(result_dir(), "/00-raw-beem-static/beem_IBD_diseased_20260414.rds"))
+res_healthy <- readRDS(file = str_c(result_dir(), "/beem_res_healthy_IBD_20260414.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/beem_res_diseased_IBD_20260414.rds"))
 
 ```
 
@@ -349,18 +349,18 @@ In the chunk code below, we run FlashWeave on all taxa for healthy and diseased 
 ```{r}
 #| eval: false
 
-res_healthy <- run_network_bootstrap(healthy_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
-
-beepr::beep(2)
-
-res_diseased <- run_network_bootstrap(diseased_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
-
-beepr::beep(2)
-
-saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBS_20260419.rds"))
-saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBS_20260419.rds"))
-
-beepr::beep(2)
+# res_healthy <- run_network_bootstrap(healthy_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.8, 0.9), max_attempts = 120, prevalence_threshold = 0)
+# 
+# beepr::beep(2)
+# 
+# res_diseased <- run_network_bootstrap(diseased_df, run_fn = run_flashweave, n_bootstrap = 100, subsample_pcts = c(0.6, 0.7, 0.8), max_attempts = 120, prevalence_threshold = 0)
+# 
+# beepr::beep(2)
+# 
+# saveRDS(res_healthy, file = str_c(result_dir(), "/flashweave_res_healthy_IBS_20260419.rds"))
+# saveRDS(res_diseased, file = str_c(result_dir(), "/flashweave_res_diseased_IBS_20260419.rds"))
+# 
+# beepr::beep(2)
 
 ```
 
@@ -519,6 +519,66 @@ plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon even
 
 ```
 
+
+### BEEM-Static
+
+```{r}
+# import file from cluster
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/beem_res_healthy_CDI_20260428.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/beem_res_diseased_CDI_20260428.rds"))
+
+```
+
+The results are obtained in the chunk code below.
+
+```{r}
+
+df_res_healthy <- get_stats_df(res_healthy, symmetric = TRUE)
+df_res_diseased <- get_stats_df(res_diseased, symmetric = TRUE)
+
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
+
+```
+
+
+```{r}
+#| fig-height: 10
+#| fig-width: 12
+
+plot_diversity_results(df_res, cohort_name = "CDI")+ patchwork::plot_annotation(title = "BEEM-Static results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison of PEP, evenness, Shannon diversity and richness between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "BEEM-Static results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+We also compute the net interactions (rho) in the healthy and diseased samples and compare it with PEP in the plot below.
+
+```{r}
+#| fig-height: 6
+#| fig-width: 12
+
+plot_network_results(df_res) + plot_annotation(title = "BEEM-Static results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+We check correlation between net interaction and Sheldon evenness in the plot below.
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "BEEM-Static results for the CDI cohort (Ferretti et al., 2023)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
 ## CRC cohort (Yachida et al., 2019)
 
 ```{r}
@@ -620,13 +680,11 @@ plot_diversity_results(df_res, cohort_name = "CRC") + plot_annotation(title = "F
 
 ```
 
-
 ```{r}
 
 plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
-
 
 ```{r}
 #| fig-height: 6
@@ -636,10 +694,63 @@ plot_network_results(df_res) + plot_annotation(title = "FlashWeave results for t
 
 ```
 
-
 ```{r}
 
 plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "FlashWeave results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+### BEEM-Static
+
+```{r}
+# import file from cluster
+
+res_healthy <- readRDS(file = str_c(result_dir(), "/beem_res_healthy_CRC_20260428.rds"))
+res_diseased <- readRDS(file = str_c(result_dir(), "/beem_res_diseased_CRC_20260428.rds"))
+
+```
+
+
+```{r}
+
+df_res_healthy <- get_stats_df(res_healthy, symmetric = TRUE)
+df_res_diseased <- get_stats_df(res_diseased, symmetric = TRUE)
+
+df_res <-
+  bind_rows(
+    df_res_healthy |> mutate(group = "Healthy"),
+    df_res_diseased |> mutate(group = "Diseased")
+  )
+
+```
+
+We plot the results below.
+
+```{r}
+#| fig-height: 10
+#| fig-width: 12
+
+plot_diversity_results(df_res, cohort_name = "CRC") + plot_annotation(title = "BEEM-Static results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between healthy and diseased samples for PEP, Sheldon evenness, Shannon diversity and richness", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "pep") + labs(x = "Sheldon evenness", y = "Positive edge percentage (PEP)", color = "Group", fill = "Group", title = "BEEM-Static results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and PEP in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
+
+```
+
+```{r}
+#| fig-height: 6
+#| fig-width: 12
+
+plot_network_results(df_res) + plot_annotation(title = "BEEM-Static results for the CRC cohort (Yachida et al., 2019)", subtitle = "Comparison between PEP and net interaction results between healthy and diseased samples", caption = "*: p < 0.05; **: p < 0.01; ***: p < 0.001; ****: p < 0.0001; ns: not significant (Wilcoxon test)")
+
+```
+
+```{r}
+
+plot_correlation_results(df_res, variable_name = "rho") + labs(x = "Sheldon evenness", y = "Net interactions (rho)", color = "Group", fill = "Group", title = "BEEM-Static results for the CRC cohort (Yachida et al., 2019)", subtitle = "Correlation between Sheldon evenness and net interaction in healthy and diseased samples", caption = "Correlation is computed with Pearson's correlation test")
 
 ```
 
