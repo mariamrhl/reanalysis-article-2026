@@ -1,9 +1,6 @@
 ---
 title: "Comments on 'Imbalance in gut microbial interactionsas a marker of health and disease' from Corral López et al. (2026)"
 bibliography: references.bib
-author:
-  - Mariam Rahali Masbouri
-  - Karoline Faust
 date: today 
 format:
   html:
@@ -21,6 +18,7 @@ execute:
   warning: false
 project:
   execute-dir: project
+  type: website
 editor: source
 editor_options: 
   chunk_output_type: inline
@@ -246,7 +244,7 @@ if (reset) {
 
 ```
 
-We first examined the CRC dataset from @Yachida2019. Contrary to the pattern reported by @CorralLopez2026, net interaction values were significantly higher in healthy samples compared to diseased samples. This result directly opposes the proposed universal shift toward positive interactions in disease. Importantly, this trend was consistent across network inference methods (FlashWeave and BEEM-Static), subsampling fractions, and was further supported by Positive Edge Percentage (PEP) analyses (@fig-main-CRC; Supp. Fig. -@fig-CRC-pep).
+When examining the CRC dataset from @Yachida2019, we found that net interaction values were significantly higher in healthy samples compared to diseased samples, contrary to the pattern reported by @CorralLopez2026. This result directly opposes the proposed universal shift toward positive interactions in disease. Importantly, this trend was consistent across network inference methods (FlashWeave and BEEM-Static), subsampling fractions, and was further supported by Positive Edge Percentage (PEP) analyses (@fig-main-CRC; Supp. Fig. -@fig-CRC-pep).
 
 ```{r}
 #| label: fig-main-CRC
@@ -302,7 +300,7 @@ p2 <- df_res_main_beem |>
 
 ```
 
-To assess whether this discrepancy was dataset-specific, we analyzed additional CRC cohorts [@Vogtmann2016; @Wirbel2019 @Zeller2014]. In these datasets, net interactions were generally higher in diseased samples, in agreement with previous reports. However, a substantial overlap between healthy and diseased samples was consistently observed across all cohorts (@fig-supp-CRC). This overlap suggests that, even when group-level differences exist, net interaction values might not be universally more positive in diseased samples.
+To assess whether this discrepancy was dataset-specific, we analyzed additional CRC cohorts [@Vogtmann2016; @Wirbel2019 @Zeller2014]. In these datasets, net interactions were generally higher in diseased samples, in agreement with previous reports (@fig-supp-CRC). While group-level differences in net interaction values are observed, the distributions are not clearly separated, particularly in Figure -@fig-supp-CRC A. This suggests that ENBI mainly reflects cohort-level structure rather than independent subject-level variation, since network inference requires multiple samples.
 
 ```{r}
 #| label: fig-supp-CRC
@@ -450,7 +448,7 @@ patchwork::plot_layout(ncol = 2, guides = "collect") + plot_annotation(tag_level
 
 ## Conclusion
 
-In this work, we reassessed the relationship between microbial interaction imbalance and disease status across multiple gut microbiome datasets. While increased net positive interactions in diseased samples were observed in IBD and CDI, this pattern was not consistent across all conditions. Notably, the CRC dataset from @Yachida2019 exhibited the opposite trend, with higher net interaction values in healthy samples, a result that was robust across inference methods and subsampling strategies. Moreover, even in datasets where statistically significant differences were detected, with diseased samples exhibiting more positive net interactions, substantial overlap between healthy and diseased samples was observed. Taken together, these findings do not support the claim that microbial interaction imbalance constitutes a universal signature of disease, but rather suggest that such metrics are context-dependent.
+In this work, we reassessed the relationship between microbial interaction imbalance and disease status across multiple gut microbiome datasets. While increased net positive interactions in diseased samples were observed in IBD and CDI, this pattern was not consistent across all conditions. Notably, the CRC dataset from @Yachida2019 exhibited the opposite trend, with higher net interaction values in healthy samples, a result that was robust across inference methods and subsampling strategies. Consequently, these findings do not support the claim that microbial interaction imbalance constitutes a universal signature of disease, but rather suggest that such metrics are context-dependent.
 
 ## References
 
