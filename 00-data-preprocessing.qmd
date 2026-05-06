@@ -12,7 +12,7 @@ format:
      toc-depth: 5
      embed-resources: true
 execute:
-  cache: true
+  cache: false
   warning: false
 knitr:
   opts_chunk:
@@ -249,10 +249,6 @@ rowSums(abundance) |> summary()
 
 ```
 
-::: {.callout-warning}
-A sample has a taxon with relative abundance of 1. This means that this sample has only one taxon with non-zero relative abundance. However, this taxon was not identified above (before the renormalization), so this is likely due the renormalization step.
-:::
-
 ```{r}
 
 # Get sample names where no taxon has a relative abundance > 0
@@ -336,7 +332,7 @@ rm(abundance, metadata, metadata_filtered, samples, taxonomy, df, data)
 
 The irritable bowel syndrome (IBS) dataset in Mars et al. (2020) was obtained from [Mendeley data](https://data.mendeley.com/datasets/29n2z5r5ph/3) plateform. 
 
-Metagenomics were performed for 474 stool samples recolted from 77 participants, separated into healthy controls (H),  constipation predominant (IBS-C), diarrhea predominant (IBS-D), or mixed (IBS-M). DNA was extracted from stool samples using the QIAGEN PowerSoil kit and quantified by NanoDrop and PicoGreen assays. Shotgun metagenomic libraries were prepared using a modified Nextera XT protocol and sequenced on either a HiSeq 2500 or NextSeq platform with single-end reads. Samples from three cohorts were randomly distributed across two sequencing runs to reduce batch effects. Reads were trimmed to 100 bp and aligned to a prokaryotic reference genome collection at 97% identity using BURST, with low-depth samples (< 10,000 reads) removed. Functional profiles were generated using KEGG Orthology annotations, and low-abundance gene estimates were further improved using SHOGUN.
+Metagenomics were performed for 474 stool samples recolted from 77 participants, separated into healthy controls (H), constipation predominant (IBS-C), diarrhea predominant (IBS-D), or mixed (IBS-M). DNA was extracted from stool samples using the QIAGEN PowerSoil kit and quantified by NanoDrop and PicoGreen assays. Shotgun metagenomic libraries were prepared using a modified Nextera XT protocol and sequenced on either a HiSeq 2500 or NextSeq platform with single-end reads. Samples from three cohorts were randomly distributed across two sequencing runs to reduce batch effects. Reads were trimmed to 100 bp and aligned to a prokaryotic reference genome collection at 97% identity using BURST, with low-depth samples (< 10,000 reads) removed. Functional profiles were generated using KEGG Orthology annotations, and low-abundance gene estimates were further improved using SHOGUN.
 
 For the analyses, we have the following datasets at our disposal:
 
@@ -854,10 +850,10 @@ abundance <- abundance |>
 ```{r}
 
 # Get the names of taxa that have 0 relative abundance across all samples
-rownames(abundance)[rowSums(abundance) == 0]
+rownames(abundance)[rowSums(abundance) == 0] |> length()
 
 # Get sample names where no taxon has a relative abundance > 0
-colnames(abundance)[colSums(abundance) == 0]
+colnames(abundance)[colSums(abundance) == 0] |> length()
 
 ```
 
@@ -1375,37 +1371,9 @@ mae
 We save the preprocessed MAE object as an RDS file for later use in the downstream analyses.
 
 ```{r}
+#| eval: false
 
 saveRDS(mae, file.path(data_dir(), "02-processed-data", str_c("MAE_processed_", today() |> str_remove_all("-"), ".rds")))
-
-```
-
-# Appendix A: Summary table
-
-```{r}
-
-group_var <- c(IBD = "diagnosis", CDI = "group", CRC = "cohort", CRC_VOGTMANN = "disease", CRC_ZELLER = "disease", CRC_WIRBEL = "disease", IBD_FRANZOSA = "diagnosis")
-
-tbl <- map_dfr(names(group_var), function(ds) {
-  
-  mat <- mae[[ds]] |> assay()
-  meta <- colData(mae[[ds]]) |> as.data.frame()
-  
-  gvar <- group_var[[ds]]
-  
-  tibble(
-    dataset = ds,
-    group = meta[[gvar]]
-  ) |>
-    group_by(dataset, group) |>
-    summarise(
-      n_samples = n(),
-      n_taxa = nrow(mat),
-      .groups = "drop"
-    )
-})
-
-tbl |> group_by(dataset) |> gt()
 
 ```
 
