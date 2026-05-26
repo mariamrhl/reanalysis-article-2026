@@ -1,5 +1,5 @@
 ---
-title: "Comments on 'Imbalance in gut microbial interactionsas a marker of health and disease' from Corral López et al. (2026)"
+title: "Comments on 'Imbalance in gut microbial interactions as a marker of health and disease' from Corral López et al. (2026)"
 bibliography: references.bib
 date: today 
 format:
@@ -74,7 +74,7 @@ In this study, we reassessed microbial interaction patterns by quantifying net i
 
 ## Results and discussion
 
-We analyzed multiple gut microbiome datasets from inflammatory bowel disease (IBD), *Clostridioides difficile* infection (CDI), and colorectal cancer (CRC), including both primary (used by @CorralLopez2026) and independent validation cohorts. Sample sizes and features for each dataset are summarized in @tbl-summary-main and @tbl-summary-supp. All datasets were processed in `00-data-preprocessing.qmd` (see GitHub repository), and microbial interaction networks were inferred using both FlashWeave and BEEM-Static, combined with resampling strategies for bootstrapping. Differences between healthy and diseased groups were assessed using Wilcoxon rank-sum tests.
+We analyzed multiple gut microbiome datasets from inflammatory bowel disease (IBD), *Clostridioides difficile* infection (CDI), and colorectal cancer (CRC), including both primary (used by @CorralLopez2026) and independent validation cohorts. Sample sizes and features for each dataset are summarized in @tbl-summary-main and @tbl-summary-supp. All datasets were processed in `00-data-preprocessing.qmd` (see [GitHub repository](https://github.com/mariamrhl/reanalysis-article-2026)), and microbial interaction networks were inferred using both FlashWeave and BEEM-Static, combined with resampling strategies for bootstrapping. Differences between healthy and diseased groups were assessed using Wilcoxon rank-sum tests.
 
 ```{r}
 
